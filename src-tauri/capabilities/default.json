@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability.schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-start-dragging",
+    "core:window:deny-internal-toggle-maximize",
+    "shell:allow-open",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered"
+  ]
+}
