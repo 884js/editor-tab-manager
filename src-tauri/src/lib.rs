@@ -1,3 +1,4 @@
+mod observer;
 mod vscode;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -115,6 +116,10 @@ pub fn run() {
             if let Err(e) = setup_shortcuts(app.handle()) {
                 eprintln!("Failed to setup shortcuts: {}", e);
             }
+
+            // Start NSWorkspace observer for app activation events
+            observer::start_observer(app.handle().clone());
+
             Ok(())
         })
         .run(tauri::generate_context!())

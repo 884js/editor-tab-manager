@@ -48,6 +48,12 @@ function sortWindowsByOrder(windows: VSCodeWindow[], order: string[]): VSCodeWin
   });
 }
 
+// Payload from app-activated event
+interface AppActivationPayload {
+  app_type: "vscode" | "tab_manager" | "other";
+  bundle_id: string | null;
+}
+
 function App() {
   const [windows, setWindows] = useState<VSCodeWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -56,6 +62,7 @@ function App() {
   const isVisibleRef = useRef(true);
   const isInitializedRef = useRef(false);
   const tabOrderRef = useRef<string[]>(loadTabOrder());
+  const isVSCodeActiveRef = useRef(false); // Track if VSCode/Cursor is currently active
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -96,6 +103,9 @@ function App() {
   const pollVSCodeState = useCallback(async (appWindow: ReturnType<typeof getCurrentWindow>) => {
     try {
       const state = await invoke<VSCodeState>("get_vscode_state");
+
+      // Update isVSCodeActiveRef based on state (root cause fix)
+      isVSCodeActiveRef.current = state.is_active;
 
       // Update visibility
       if (state.is_active && !isVisibleRef.current) {
@@ -270,10 +280,39 @@ function App() {
     };
   }, []); // Empty dependency array - listeners set up once
 
-  // Unified polling: windows + visibility in single AppleScript call
+  // Fetch windows only (without visibility check) - used when VSCode is active
+  const fetchWindows = useCallback(async () => {
+    try {
+      const result = await invoke<VSCodeWindow[]>("get_vscode_windows");
+      // Sort by custom order
+      const sorted = sortWindowsByOrder(result, tabOrderRef.current);
+      // Update order with current windows
+      const newOrder = sorted.map(w => w.name);
+      tabOrderRef.current = newOrder;
+      saveTabOrder(newOrder);
+
+      // Update windows only if changed
+      const currentWindows = windowsRef.current;
+      const hasChanged = sorted.length !== currentWindows.length ||
+        sorted.some((w, i) => currentWindows[i]?.name !== w.name);
+
+      if (hasChanged) {
+        setWindows(sorted);
+        if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
+          setActiveIndex(sorted.length - 1);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch windows:", error);
+    }
+  }, []);
+
+  // Event-driven visibility + smart polling
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let isMounted = true;
+    const cleanupFns: (() => void)[] = [];
 
     // Initialize window on startup
     const initWindow = async () => {
@@ -286,19 +325,54 @@ function App() {
       await appWindow.show();
       isVisibleRef.current = true;
 
-      // Initial fetch
+      // Initial fetch with visibility check
       await pollVSCodeState(appWindow);
     };
     initWindow();
 
-    // Start unified polling after delay
+    // Listen for app activation events from NSWorkspace observer
+    const setupAppActivationListener = async () => {
+      const unlisten = await listen<AppActivationPayload>("app-activated", async (event) => {
+        if (!isMounted) return;
+
+        const { app_type } = event.payload;
+
+        if (app_type === "vscode" || app_type === "tab_manager") {
+          // VSCode or our app is active - show the tab bar
+          isVSCodeActiveRef.current = app_type === "vscode";
+          if (!isVisibleRef.current) {
+            await appWindow.show();
+            isVisibleRef.current = true;
+          }
+          // Fetch windows immediately when VSCode becomes active
+          if (app_type === "vscode") {
+            await fetchWindows();
+          }
+        } else {
+          // Other app is active - hide the tab bar
+          isVSCodeActiveRef.current = false;
+          if (isVisibleRef.current) {
+            await appWindow.hide();
+            isVisibleRef.current = false;
+          }
+        }
+      });
+      cleanupFns.push(unlisten);
+    };
+    setupAppActivationListener();
+
+    // Polling: always poll to keep state in sync (NSWorkspace events are supplementary)
     const startDelay = setTimeout(() => {
-      intervalId = setInterval(() => pollVSCodeState(appWindow), 500);
+      intervalId = setInterval(async () => {
+        await pollVSCodeState(appWindow);
+      }, 1000); // 1000ms polling (events provide faster response when working)
     }, 2000);
 
     return () => {
+      isMounted = false;
       clearTimeout(startDelay);
       if (intervalId) clearInterval(intervalId);
+      cleanupFns.forEach((fn) => fn());
     };
   }, [pollVSCodeState]);
 
