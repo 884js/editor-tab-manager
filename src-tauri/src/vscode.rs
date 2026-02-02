@@ -64,6 +64,12 @@ pub fn get_vscode_state() -> VSCodeState {
                         if parts.len() >= 2 {
                             let original_index = parts[0].parse::<i32>().unwrap_or(0);
                             let title = parts[1].to_string();
+
+                            // Filter out temporary/transient windows
+                            if title.is_empty() || title == "Untitled" {
+                                return None;
+                            }
+
                             let name = extract_project_name(&title);
                             Some((original_index, VSCodeWindow {
                                 id: original_index,
@@ -168,6 +174,11 @@ pub fn get_vscode_windows() -> Vec<VSCodeWindow> {
                     if parts.len() >= 2 {
                         let original_index = parts[0].parse::<i32>().unwrap_or(0);
                         let title = parts[1].to_string();
+
+                        // Filter out temporary/transient windows
+                        if title.is_empty() || title == "Untitled" {
+                            return None;
+                        }
 
                         // Extract project name from title
                         // VSCode title format: "filename — folder — Visual Studio Code"
