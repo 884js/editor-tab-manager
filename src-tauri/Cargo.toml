@@ -1,12 +1,12 @@
 [package]
-name = "vscode-tab-manager"
+name = "editor-tab-manager"
 version = "0.1.0"
-description = "VSCode Tab Manager"
+description = "Editor Tab Manager"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "vscode_tab_manager_lib"
+name = "editor_tab_manager_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

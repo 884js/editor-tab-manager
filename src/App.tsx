@@ -20,7 +20,7 @@ interface EditorState {
   active_index: number | null;  // Index of the frontmost window after sorting
 }
 
-const TAB_ORDER_KEY = "vscode-tab-manager-order";
+const TAB_ORDER_KEY = "editor-tab-manager-order";
 
 // Load tab order from localStorage
 function loadTabOrder(): string[] {

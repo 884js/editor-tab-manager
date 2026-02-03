@@ -1,5 +1,5 @@
 {
-  "name": "vscode-tab-manager",
+  "name": "editor-tab-manager",
   "private": true,
   "version": "0.1.0",
   "type": "module",

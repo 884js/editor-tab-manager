@@ -32,8 +32,8 @@ fn build_active_check_condition() -> String {
         }
     }
     // Also include our tab manager
-    conditions.push("(frontApp is \"VSCode Tab Manager\")".to_string());
-    conditions.push("(frontApp is \"vscode-tab-manager\")".to_string());
+    conditions.push("(frontApp is \"Editor Tab Manager\")".to_string());
+    conditions.push("(frontApp is \"editor-tab-manager\")".to_string());
     conditions.join(" or ")
 }
 
@@ -172,7 +172,7 @@ pub fn is_vscode_active() -> bool {
             let app_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
             // Check if it's our tab manager
-            if app_name == "VSCode Tab Manager" || app_name == "vscode-tab-manager" {
+            if app_name == "Editor Tab Manager" || app_name == "editor-tab-manager" {
                 return true;
             }
 

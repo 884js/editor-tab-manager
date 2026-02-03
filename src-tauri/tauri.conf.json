@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "VSCode Tab Manager",
+  "productName": "Editor Tab Manager",
   "version": "0.1.0",
-  "identifier": "com.vscode-tab-manager.app",
+  "identifier": "com.editor-tab-manager.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "VSCode Tab Manager",
+        "title": "Editor Tab Manager",
         "width": 3840,
         "height": 36,
         "minWidth": 400,
