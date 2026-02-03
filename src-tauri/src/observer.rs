@@ -1,3 +1,4 @@
+use crate::editor::is_supported_editor;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue, NSString};
@@ -7,17 +8,12 @@ use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 
-// Target bundle identifiers
-const VSCODE_BUNDLE_ID: &str = "com.microsoft.VSCode";
-const CURSOR_BUNDLE_ID: &str = "com.todesktop.230313mzl4w4u92";
-
 static OBSERVER_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Check if the given app is VSCode or Cursor
+/// Check if the given app is a supported editor (VSCode, Cursor, etc.)
 fn is_target_app(app: &NSRunningApplication) -> bool {
     if let Some(bundle_id) = app.bundleIdentifier() {
-        let bundle_str = bundle_id.to_string();
-        return bundle_str == VSCODE_BUNDLE_ID || bundle_str == CURSOR_BUNDLE_ID;
+        return is_supported_editor(&bundle_id.to_string());
     }
     false
 }

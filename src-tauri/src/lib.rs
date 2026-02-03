@@ -1,10 +1,12 @@
+mod editor;
 mod observer;
 mod vscode;
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use vscode::{VSCodeState, VSCodeWindow};
+use vscode::{EditorState, EditorWindow, VSCodeState, VSCodeWindow};
 
+// Legacy commands (backward compatible)
 #[tauri::command(rename_all = "snake_case")]
 fn get_vscode_windows() -> Vec<VSCodeWindow> {
     vscode::get_vscode_windows()
@@ -33,6 +35,32 @@ fn close_vscode_window(window_id: i32) -> Result<(), String> {
 #[tauri::command(rename_all = "snake_case")]
 fn is_vscode_active() -> bool {
     vscode::is_vscode_active()
+}
+
+// New commands with bundle_id support
+#[tauri::command(rename_all = "snake_case")]
+fn get_editor_windows(bundle_id: &str) -> Vec<EditorWindow> {
+    vscode::get_editor_windows(bundle_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn get_editor_state(bundle_id: &str) -> EditorState {
+    vscode::get_editor_state(bundle_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+    vscode::focus_editor_window(bundle_id, window_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn open_new_editor(bundle_id: &str) -> Result<(), String> {
+    vscode::open_new_editor(bundle_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+    vscode::close_editor_window(bundle_id, window_id)
 }
 
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -105,12 +133,19 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            // Legacy commands (backward compatible)
             get_vscode_windows,
             get_vscode_state,
             focus_vscode_window,
             open_new_vscode,
             close_vscode_window,
-            is_vscode_active
+            is_vscode_active,
+            // New commands with bundle_id support
+            get_editor_windows,
+            get_editor_state,
+            focus_editor_window,
+            open_new_editor,
+            close_editor_window
         ])
         .setup(|app| {
             if let Err(e) = setup_shortcuts(app.handle()) {

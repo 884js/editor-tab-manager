@@ -5,15 +5,18 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { currentMonitor } from "@tauri-apps/api/window";
 import TabBar from "./components/TabBar";
 
-export interface VSCodeWindow {
+export interface EditorWindow {
   id: number;
   name: string;
   path: string;
 }
 
-interface VSCodeState {
+// Type alias for backward compatibility
+export type VSCodeWindow = EditorWindow;
+
+interface EditorState {
   is_active: boolean;
-  windows: VSCodeWindow[];
+  windows: EditorWindow[];
   active_index: number | null;  // Index of the frontmost window after sorting
 }
 
@@ -35,7 +38,7 @@ function saveTabOrder(order: string[]): void {
 }
 
 // Sort windows by custom order, new windows go to the end
-function sortWindowsByOrder(windows: VSCodeWindow[], order: string[]): VSCodeWindow[] {
+function sortWindowsByOrder(windows: EditorWindow[], order: string[]): EditorWindow[] {
   const orderMap = new Map(order.map((name, index) => [name, index]));
   return [...windows].sort((a, b) => {
     const indexA = orderMap.get(a.name) ?? Infinity;
@@ -55,14 +58,15 @@ interface AppActivationPayload {
 }
 
 function App() {
-  const [windows, setWindows] = useState<VSCodeWindow[]>([]);
+  const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const windowsRef = useRef<VSCodeWindow[]>([]);
+  const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
   const isInitializedRef = useRef(false);
   const tabOrderRef = useRef<string[]>(loadTabOrder());
   const isVSCodeActiveRef = useRef(false); // Track if VSCode/Cursor is currently active
+  const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -75,7 +79,10 @@ function App() {
 
   const refreshWindows = useCallback(async () => {
     try {
-      const result = await invoke<VSCodeWindow[]>("get_vscode_windows");
+      const bundleId = currentBundleIdRef.current;
+      const result = bundleId
+        ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: bundleId })
+        : await invoke<EditorWindow[]>("get_vscode_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order with current windows (remove deleted, keep order for existing)
@@ -95,14 +102,17 @@ function App() {
         }
       }
     } catch (error) {
-      console.error("Failed to get VSCode windows:", error);
+      console.error("Failed to get editor windows:", error);
     }
   }, []);
 
   // Optimized: Single polling for both windows and visibility
-  const pollVSCodeState = useCallback(async (appWindow: ReturnType<typeof getCurrentWindow>) => {
+  const pollEditorState = useCallback(async (appWindow: ReturnType<typeof getCurrentWindow>) => {
     try {
-      const state = await invoke<VSCodeState>("get_vscode_state");
+      const bundleId = currentBundleIdRef.current;
+      const state = bundleId
+        ? await invoke<EditorState>("get_editor_state", { bundle_id: bundleId })
+        : await invoke<EditorState>("get_vscode_state");
 
       // Update isVSCodeActiveRef based on state (root cause fix)
       isVSCodeActiveRef.current = state.is_active;
@@ -138,7 +148,7 @@ function App() {
         windowsRef.current = sorted;
       }
 
-      // Always sync activeIndex with frontmost VSCode window
+      // Always sync activeIndex with frontmost editor window
       if (state.active_index !== null && state.windows.length > 0) {
         const frontmostName = state.windows[state.active_index]?.name;
         const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
@@ -148,7 +158,7 @@ function App() {
       }
       isInitializedRef.current = true;
     } catch (error) {
-      console.error("Failed to poll VSCode state:", error);
+      console.error("Failed to poll editor state:", error);
     }
   }, []);
 
@@ -157,19 +167,31 @@ function App() {
     setActiveIndex(index);
     const window = windowsRef.current[index];
     if (window) {
+      const bundleId = currentBundleIdRef.current;
       // Fire-and-forget: don't await, let UI respond immediately
-      invoke("focus_vscode_window", { window_id: window.id }).catch((error) => {
-        console.error("Failed to focus window:", error);
-      });
+      if (bundleId) {
+        invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
+          console.error("Failed to focus window:", error);
+        });
+      } else {
+        invoke("focus_vscode_window", { window_id: window.id }).catch((error) => {
+          console.error("Failed to focus window:", error);
+        });
+      }
     }
   }, []);
 
   const handleNewTab = useCallback(async () => {
     try {
-      await invoke("open_new_vscode");
+      const bundleId = currentBundleIdRef.current;
+      if (bundleId) {
+        await invoke("open_new_editor", { bundle_id: bundleId });
+      } else {
+        await invoke("open_new_vscode");
+      }
       setTimeout(refreshWindows, 1000);
     } catch (error) {
-      console.error("Failed to open new VSCode:", error);
+      console.error("Failed to open new editor:", error);
     }
   }, [refreshWindows]);
 
@@ -177,7 +199,12 @@ function App() {
     const window = windowsRef.current[index];
     if (window) {
       try {
-        await invoke("close_vscode_window", { window_id: window.id });
+        const bundleId = currentBundleIdRef.current;
+        if (bundleId) {
+          await invoke("close_editor_window", { bundle_id: bundleId, window_id: window.id });
+        } else {
+          await invoke("close_vscode_window", { window_id: window.id });
+        }
         setTimeout(refreshWindows, 500);
       } catch (error) {
         console.error("Failed to close window:", error);
@@ -256,7 +283,12 @@ function App() {
           const currentIndex = activeIndexRef.current;
           const currentWindows = windowsRef.current;
           if (currentWindows[currentIndex]) {
-            invoke("close_vscode_window", { window_id: currentWindows[currentIndex].id });
+            const bundleId = currentBundleIdRef.current;
+            if (bundleId) {
+              invoke("close_editor_window", { bundle_id: bundleId, window_id: currentWindows[currentIndex].id });
+            } else {
+              invoke("close_vscode_window", { window_id: currentWindows[currentIndex].id });
+            }
             setTimeout(() => refreshWindowsRef.current(), 500);
           }
         }
@@ -268,7 +300,12 @@ function App() {
           setActiveIndex(event.payload);
           const win = windowsRef.current[event.payload];
           if (win) {
-            invoke("focus_vscode_window", { window_id: win.id });
+            const bundleId = currentBundleIdRef.current;
+            if (bundleId) {
+              invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+            } else {
+              invoke("focus_vscode_window", { window_id: win.id });
+            }
           }
         }
       });
@@ -283,10 +320,13 @@ function App() {
     };
   }, []); // Empty dependency array - listeners set up once
 
-  // Fetch windows only (without visibility check) - used when VSCode is active
-  const fetchWindows = useCallback(async () => {
+  // Fetch windows only (without visibility check) - used when editor is active
+  const fetchWindows = useCallback(async (bundleId?: string | null) => {
     try {
-      const result = await invoke<VSCodeWindow[]>("get_vscode_windows");
+      const targetBundleId = bundleId ?? currentBundleIdRef.current;
+      const result = targetBundleId
+        ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: targetBundleId })
+        : await invoke<EditorWindow[]>("get_vscode_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order with current windows
@@ -329,7 +369,7 @@ function App() {
       isVisibleRef.current = true;
 
       // Initial fetch with visibility check
-      await pollVSCodeState(appWindow);
+      await pollEditorState(appWindow);
     };
     initWindow();
 
@@ -338,18 +378,22 @@ function App() {
       const unlisten = await listen<AppActivationPayload>("app-activated", async (event) => {
         if (!isMounted) return;
 
-        const { app_type } = event.payload;
+        const { app_type, bundle_id } = event.payload;
 
         if (app_type === "vscode" || app_type === "tab_manager") {
-          // VSCode or our app is active - show the tab bar
+          // Editor or our app is active - show the tab bar
           isVSCodeActiveRef.current = app_type === "vscode";
+          if (app_type === "vscode" && bundle_id) {
+            // Update current bundle ID when editor becomes active
+            currentBundleIdRef.current = bundle_id;
+          }
           if (!isVisibleRef.current) {
             await appWindow.show();
             isVisibleRef.current = true;
           }
-          // Fetch windows immediately when VSCode becomes active
+          // Fetch windows immediately when editor becomes active
           if (app_type === "vscode") {
-            await fetchWindows();
+            await fetchWindows(bundle_id);
           }
         } else {
           // Other app is active - hide the tab bar
@@ -367,7 +411,7 @@ function App() {
     // Polling: always poll to keep state in sync (NSWorkspace events are supplementary)
     const startDelay = setTimeout(() => {
       intervalId = setInterval(async () => {
-        await pollVSCodeState(appWindow);
+        await pollEditorState(appWindow);
       }, 1000); // 1000ms polling (events provide faster response when working)
     }, 2000);
 
@@ -377,7 +421,7 @@ function App() {
       if (intervalId) clearInterval(intervalId);
       cleanupFns.forEach((fn) => fn());
     };
-  }, [pollVSCodeState]);
+  }, [pollEditorState, fetchWindows]);
 
   return (
     <TabBar
