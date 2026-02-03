@@ -3,6 +3,8 @@ mod notification;
 mod observer;
 mod vscode;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use vscode::{EditorState, EditorWindow, VSCodeState, VSCodeWindow};
@@ -67,6 +69,15 @@ fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
 #[tauri::command(rename_all = "snake_case")]
 fn clear_claude_notification(path: Option<String>) {
     notification::clear_notification_file_for_path(path.as_deref());
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn open_file_in_default_app(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -138,6 +149,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             // Legacy commands (backward compatible)
             get_vscode_windows,
@@ -153,9 +165,38 @@ pub fn run() {
             open_new_editor,
             close_editor_window,
             // Claude Code notification
-            clear_claude_notification
+            clear_claude_notification,
+            // File operations
+            open_file_in_default_app
         ])
         .setup(|app| {
+            // Set app as accessory (no Dock icon, menu bar only)
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Setup menu bar tray icon
+            let settings_item = MenuItem::with_id(app, "settings", "設定...", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit Editor Tab Manager", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .icon_as_template(true)
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "settings" {
+                        if let Some(window) = app.get_webview_window("main") {
+                            // ウィンドウを先に表示してからイベントを送信
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit("show-settings", ());
+                        }
+                    } else if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
+                .build(app)?;
+
             if let Err(e) = setup_shortcuts(app.handle()) {
                 eprintln!("Failed to setup shortcuts: {}", e);
             }

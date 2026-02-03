@@ -94,7 +94,7 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
             let (windows, active_index) = if windows_data.is_empty() {
                 (vec![], None)
             } else {
-                let mut windows_with_index: Vec<(i32, EditorWindow)> = windows_data
+                let windows_with_index: Vec<(i32, EditorWindow)> = windows_data
                     .split("@@@")
                     .filter_map(|entry| {
                         let parts: Vec<&str> = entry.split("|||").collect();
@@ -119,10 +119,7 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
                     })
                     .collect();
 
-                // Sort by name (project name) for stable ordering
-                windows_with_index.sort_by(|a, b| a.1.name.cmp(&b.1.name));
-
-                // Find the index of the frontmost window (original index 1) after sorting
+                // Find the index of the frontmost window (original index 1)
                 let active_idx = windows_with_index.iter()
                     .position(|(original_idx, _)| *original_idx == 1);
 
@@ -240,7 +237,7 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
             }
 
             // Collect windows with their original AppleScript index
-            let mut windows_with_index: Vec<(i32, EditorWindow)> = stdout
+            let windows_with_index: Vec<(i32, EditorWindow)> = stdout
                 .split("@@@")
                 .filter_map(|entry| {
                     let parts: Vec<&str> = entry.split("|||").collect();
@@ -267,10 +264,7 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
                 })
                 .collect();
 
-            // Sort by name (project name) for stable ordering
-            windows_with_index.sort_by(|a, b| a.1.name.cmp(&b.1.name));
-
-            // Keep the original AppleScript index as ID
+            // Keep the original AppleScript index as ID (sorting is handled by frontend)
             windows_with_index.into_iter().map(|(original_index, mut w)| {
                 w.id = original_index;
                 w

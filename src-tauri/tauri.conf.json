@@ -15,11 +15,10 @@
     "windows": [
       {
         "title": "Editor Tab Manager",
-        "width": 3840,
+        "width": 800,
         "height": 36,
         "minWidth": 400,
         "minHeight": 36,
-        "maxHeight": 36,
         "resizable": true,
         "transparent": true,
         "decorations": false,
