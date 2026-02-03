@@ -15,9 +15,10 @@ const SETUP_CODE = `{
           "type": "command",
           "command": "echo $PWD >> /tmp/claude-code-waiting"
         }]
-      },
+      }
+    ],
+    "Stop": [
       {
-        "matcher": "stop",
         "hooks": [{
           "type": "command",
           "command": "echo $PWD >> /tmp/claude-code-waiting"

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { currentMonitor } from "@tauri-apps/api/window";
+import { load } from "@tauri-apps/plugin-store";
+import type { Store } from "@tauri-apps/plugin-store";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 
@@ -18,24 +20,45 @@ export type VSCodeWindow = EditorWindow;
 interface EditorState {
   is_active: boolean;
   windows: EditorWindow[];
-  active_index: number | null;  // Index of the frontmost window after sorting
+  active_index: number | null;  // Index of the frontmost window
 }
 
-const TAB_ORDER_KEY = "editor-tab-manager-order";
+// Store instance (lazily initialized)
+let storePromise: Promise<Store> | null = null;
 
-// Load tab order from localStorage
-function loadTabOrder(): string[] {
+async function getStore(): Promise<Store> {
+  if (!storePromise) {
+    storePromise = load("tab-order.json");
+  }
+  return storePromise;
+}
+
+// Get order key based on editor bundle ID
+function getOrderKey(bundleId: string | null): string {
+  return `order:${bundleId || "default"}`;
+}
+
+// Load tab order from Store
+async function loadTabOrder(bundleId: string | null): Promise<string[]> {
   try {
-    const saved = localStorage.getItem(TAB_ORDER_KEY);
-    return saved ? JSON.parse(saved) : [];
+    const store = await getStore();
+    const key = getOrderKey(bundleId);
+    const saved = await store.get<string[]>(key);
+    return saved || [];
   } catch {
     return [];
   }
 }
 
-// Save tab order to localStorage
-function saveTabOrder(order: string[]): void {
-  localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+// Save tab order to Store
+async function saveTabOrder(bundleId: string | null, order: string[]): Promise<void> {
+  try {
+    const store = await getStore();
+    const key = getOrderKey(bundleId);
+    await store.set(key, order);
+  } catch (error) {
+    console.error("Failed to save tab order:", error);
+  }
 }
 
 // Sort windows by custom order, new windows go to the end
@@ -73,9 +96,10 @@ function App() {
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
   const isInitializedRef = useRef(false);
-  const tabOrderRef = useRef<string[]>(loadTabOrder());
+  const tabOrderRef = useRef<string[]>([]);
   const isVSCodeActiveRef = useRef(false); // Track if VSCode/Cursor is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
+  const orderLoadedRef = useRef(false); // Track if order has been loaded from store
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -89,15 +113,27 @@ function App() {
   const refreshWindows = useCallback(async () => {
     try {
       const bundleId = currentBundleIdRef.current;
+
+      // Load order from store if not already loaded
+      if (!orderLoadedRef.current) {
+        tabOrderRef.current = await loadTabOrder(bundleId);
+        orderLoadedRef.current = true;
+      }
+
       const result = bundleId
         ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: bundleId })
         : await invoke<EditorWindow[]>("get_vscode_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order with current windows (remove deleted, keep order for existing)
+      // Only save if order actually changed to avoid unnecessary writes
       const newOrder = sorted.map(w => w.name);
-      tabOrderRef.current = newOrder;
-      saveTabOrder(newOrder);
+      const orderChanged = newOrder.length !== tabOrderRef.current.length ||
+        newOrder.some((name, i) => tabOrderRef.current[i] !== name);
+      if (orderChanged) {
+        tabOrderRef.current = newOrder;
+        // Don't save here - only save on explicit reorder
+      }
 
       // Only update state if windows actually changed (prevents unnecessary re-renders)
       const currentWindows = windowsRef.current;
@@ -119,6 +155,13 @@ function App() {
   const pollEditorState = useCallback(async (appWindow: ReturnType<typeof getCurrentWindow>) => {
     try {
       const bundleId = currentBundleIdRef.current;
+
+      // Load order from store if not already loaded
+      if (!orderLoadedRef.current) {
+        tabOrderRef.current = await loadTabOrder(bundleId);
+        orderLoadedRef.current = true;
+      }
+
       const state = bundleId
         ? await invoke<EditorState>("get_editor_state", { bundle_id: bundleId })
         : await invoke<EditorState>("get_vscode_state");
@@ -137,10 +180,8 @@ function App() {
 
       // Sort by custom order
       const sorted = sortWindowsByOrder(state.windows, tabOrderRef.current);
-      // Update order with current windows (remove deleted, keep order for existing)
-      const newOrder = sorted.map(w => w.name);
-      tabOrderRef.current = newOrder;
-      saveTabOrder(newOrder);
+      // Update order ref but don't save to store - only save on explicit reorder
+      tabOrderRef.current = sorted.map(w => w.name);
 
       // Update windows only if changed (compare by name only, not path)
       const currentWindows = windowsRef.current;
@@ -233,10 +274,10 @@ function App() {
     const [moved] = newWindows.splice(fromIndex, 1);
     newWindows.splice(toIndex, 0, moved);
 
-    // Update order and save
+    // Update order and save to Store (only on explicit reorder)
     const newOrder = newWindows.map(w => w.name);
     tabOrderRef.current = newOrder;
-    saveTabOrder(newOrder);
+    saveTabOrder(currentBundleIdRef.current, newOrder);
 
     // Update activeIndex if needed
     let newActiveIndex = activeIndexRef.current;
@@ -355,15 +396,20 @@ function App() {
   const fetchWindows = useCallback(async (bundleId?: string | null) => {
     try {
       const targetBundleId = bundleId ?? currentBundleIdRef.current;
+
+      // Load order from store if bundle changed or not loaded yet
+      if (!orderLoadedRef.current || (bundleId && bundleId !== currentBundleIdRef.current)) {
+        tabOrderRef.current = await loadTabOrder(targetBundleId);
+        orderLoadedRef.current = true;
+      }
+
       const result = targetBundleId
         ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: targetBundleId })
         : await invoke<EditorWindow[]>("get_vscode_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
-      // Update order with current windows
-      const newOrder = sorted.map(w => w.name);
-      tabOrderRef.current = newOrder;
-      saveTabOrder(newOrder);
+      // Update order ref but don't save to store - only save on explicit reorder
+      tabOrderRef.current = sorted.map(w => w.name);
 
       // Update windows only if changed
       const currentWindows = windowsRef.current;
@@ -416,6 +462,10 @@ function App() {
           // Editor or our app is active - show the tab bar
           isVSCodeActiveRef.current = app_type === "vscode";
           if (app_type === "vscode" && bundle_id) {
+            // Reload order from store if bundle changed
+            if (bundle_id !== currentBundleIdRef.current) {
+              orderLoadedRef.current = false;
+            }
             // Update current bundle ID when editor becomes active
             currentBundleIdRef.current = bundle_id;
           }
