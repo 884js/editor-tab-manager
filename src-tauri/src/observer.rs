@@ -1,7 +1,7 @@
 use crate::editor::is_supported_editor;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
-use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue, NSString};
+use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -54,41 +54,36 @@ pub fn start_observer(app_handle: AppHandle) {
 
         let app_handle_clone = Arc::clone(&app_handle);
 
-        let block =
-            block2::RcBlock::new(move |notification: NonNull<NSNotification>| unsafe {
-                let notification = notification.as_ref();
+        let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
+            // Use frontmostApplication() instead of userInfo for Hardened Runtime compatibility
+            let workspace = NSWorkspace::sharedWorkspace();
+            let Some(app) = workspace.frontmostApplication() else {
+                return;
+            };
 
-                if let Some(user_info) = notification.userInfo() {
-                    let app_key = NSString::from_str("NSWorkspaceApplicationKey");
-                    if let Some(app_obj) = user_info.objectForKey(&app_key) {
-                        let app_ptr = Retained::as_ptr(&app_obj) as *const NSRunningApplication;
-                        let app: &NSRunningApplication = &*app_ptr;
+            let bundle_id_str = app.bundleIdentifier().map(|s| s.to_string());
 
-                        let bundle_id_str = app.bundleIdentifier().map(|s| s.to_string());
-
-                        let payload = if is_tab_manager(app, our_pid) {
-                            AppActivationPayload {
-                                app_type: "tab_manager".to_string(),
-                                bundle_id: None,
-                            }
-                        } else if is_target_app(app) {
-                            AppActivationPayload {
-                                app_type: "vscode".to_string(),
-                                bundle_id: bundle_id_str,
-                            }
-                        } else {
-                            AppActivationPayload {
-                                app_type: "other".to_string(),
-                                bundle_id: bundle_id_str,
-                            }
-                        };
-
-                        if let Some(window) = app_handle_clone.get_webview_window("main") {
-                            let _ = window.emit("app-activated", payload);
-                        }
-                    }
+            let payload = if is_tab_manager(&app, our_pid) {
+                AppActivationPayload {
+                    app_type: "tab_manager".to_string(),
+                    bundle_id: None,
                 }
-            });
+            } else if is_target_app(&app) {
+                AppActivationPayload {
+                    app_type: "vscode".to_string(),
+                    bundle_id: bundle_id_str,
+                }
+            } else {
+                AppActivationPayload {
+                    app_type: "other".to_string(),
+                    bundle_id: bundle_id_str,
+                }
+            };
+
+            if let Some(window) = app_handle_clone.get_webview_window("main") {
+                let _ = window.emit("app-activated", payload);
+            }
+        });
 
         let main_queue = NSOperationQueue::mainQueue();
 
@@ -101,7 +96,8 @@ pub fn start_observer(app_handle: AppHandle) {
             );
         }
 
-        // Send initial state
+        // Send initial state with a small delay to ensure frontend listener is ready
+        thread::sleep(std::time::Duration::from_millis(500));
         if let Some(frontmost) = get_frontmost_app() {
             let bundle_id_str = frontmost.bundleIdentifier().map(|s| s.to_string());
 

@@ -3,6 +3,8 @@ mod notification;
 mod observer;
 mod vscode;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use vscode::{EditorState, EditorWindow, VSCodeState, VSCodeWindow};
@@ -156,6 +158,20 @@ pub fn run() {
             clear_claude_notification
         ])
         .setup(|app| {
+            // Setup menu bar tray icon
+            let quit_item = MenuItem::with_id(app, "quit", "Quit Editor Tab Manager", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&quit_item])?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
+                .build(app)?;
+
             if let Err(e) = setup_shortcuts(app.handle()) {
                 eprintln!("Failed to setup shortcuts: {}", e);
             }
