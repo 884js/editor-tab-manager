@@ -107,6 +107,7 @@ const styles: Record<string, React.CSSProperties> = {
     right: 0,
     bottom: 0,
     zIndex: 0,
+    cursor: "grab",
   },
   tabsWrapper: {
     display: "flex",
