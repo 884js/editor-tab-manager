@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { currentMonitor } from "@tauri-apps/api/window";
 import TabBar from "./components/TabBar";
+import Settings from "./components/Settings";
 
 export interface EditorWindow {
   id: number;
@@ -67,6 +68,7 @@ function App() {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [badgeWindowNames, setBadgeWindowNames] = useState<Set<string>>(new Set());
+  const [showSettings, setShowSettings] = useState<boolean>(false);
   const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
@@ -386,11 +388,12 @@ function App() {
     let isMounted = true;
     const cleanupFns: (() => void)[] = [];
 
-    // Initialize window on startup
+    // Initialize window on startup - always start with tab bar
     const initWindow = async () => {
       const monitor = await currentMonitor();
       if (monitor) {
         const screenWidth = monitor.size.width / monitor.scaleFactor;
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
         await appWindow.setSize(new LogicalSize(screenWidth, 36));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
@@ -449,6 +452,27 @@ function App() {
     };
     setupAppActivationListener();
 
+    // Listen for show-settings event from tray menu
+    const setupShowSettingsListener = async () => {
+      const unlisten = await listen("show-settings", async () => {
+        const monitor = await currentMonitor();
+        if (monitor) {
+          const screenWidth = monitor.size.width / monitor.scaleFactor;
+          const screenHeight = monitor.size.height / monitor.scaleFactor;
+          await appWindow.setMaxSize(new LogicalSize(screenWidth, screenHeight));
+          await appWindow.setSize(new LogicalSize(600, 600));
+          await appWindow.setPosition(new LogicalPosition(
+            (screenWidth - 600) / 2,
+            (screenHeight - 600) / 2
+          ));
+        }
+        await appWindow.show();
+        setShowSettings(true);
+      });
+      cleanupFns.push(unlisten);
+    };
+    setupShowSettingsListener();
+
     // Polling: always poll to keep state in sync (NSWorkspace events are supplementary)
     const startDelay = setTimeout(() => {
       intervalId = setInterval(async () => {
@@ -464,16 +488,34 @@ function App() {
     };
   }, [pollEditorState, fetchWindows]);
 
+  const handleSettingsClose = useCallback(async () => {
+    setShowSettings(false);
+    // Restore to tab bar size with maxHeight restriction
+    const appWindow = getCurrentWindow();
+    const monitor = await currentMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
+      await appWindow.setSize(new LogicalSize(screenWidth, 36));
+      await appWindow.setPosition(new LogicalPosition(0, 0));
+    }
+  }, []);
+
   return (
-    <TabBar
-      tabs={windows}
-      activeIndex={activeIndex}
-      onTabClick={handleTabClick}
-      onNewTab={handleNewTab}
-      onCloseTab={handleCloseTab}
-      onReorder={handleReorder}
-      badgeWindowNames={badgeWindowNames}
-    />
+    <>
+      {!showSettings && (
+        <TabBar
+          tabs={windows}
+          activeIndex={activeIndex}
+          onTabClick={handleTabClick}
+          onNewTab={handleNewTab}
+          onCloseTab={handleCloseTab}
+          onReorder={handleReorder}
+          badgeWindowNames={badgeWindowNames}
+        />
+      )}
+      {showSettings && <Settings onClose={handleSettingsClose} />}
+    </>
   );
 }
 
