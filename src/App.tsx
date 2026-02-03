@@ -130,20 +130,23 @@ function App() {
 
       if (hasChanged) {
         setWindows(sorted);
-        // On first load, set activeIndex to the frontmost window
-        if (!isInitializedRef.current && state.active_index !== null) {
-          // Find the frontmost window's position in the sorted array
-          const frontmostName = state.windows[state.active_index]?.name;
-          const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
-          setActiveIndex(sortedIndex >= 0 ? sortedIndex : 0);
-          isInitializedRef.current = true;
-        } else if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
+        if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
           setActiveIndex(sorted.length - 1);
         }
       } else {
         // Update ref with new ids without triggering re-render
         windowsRef.current = sorted;
       }
+
+      // Always sync activeIndex with frontmost VSCode window
+      if (state.active_index !== null && state.windows.length > 0) {
+        const frontmostName = state.windows[state.active_index]?.name;
+        const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
+        if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
+          setActiveIndex(sortedIndex);
+        }
+      }
+      isInitializedRef.current = true;
     } catch (error) {
       console.error("Failed to poll VSCode state:", error);
     }

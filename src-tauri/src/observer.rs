@@ -43,100 +43,71 @@ pub struct AppActivationPayload {
 /// Start the workspace observer in a background thread
 pub fn start_observer(app_handle: AppHandle) {
     if OBSERVER_RUNNING.swap(true, Ordering::SeqCst) {
-        // Already running
-        println!("[Observer] Already running, skipping start");
         return;
     }
-
-    println!("[Observer] Starting workspace observer...");
 
     let our_pid = std::process::id() as i32;
     let app_handle = Arc::new(app_handle);
 
     thread::spawn(move || {
-        println!("[Observer] Thread started, setting up notification observer...");
-
         let workspace = NSWorkspace::sharedWorkspace();
         let notification_center = workspace.notificationCenter();
 
-        // Create notification name for app activation
         let notification_name =
             NSNotificationName::from_str("NSWorkspaceDidActivateApplicationNotification");
 
         let app_handle_clone = Arc::clone(&app_handle);
 
-        // Add observer using block
         let block =
             block2::RcBlock::new(move |notification: NonNull<NSNotification>| unsafe {
-                println!("[Observer] Received notification!");
-
                 let notification = notification.as_ref();
 
-                // Get user info dictionary
                 if let Some(user_info) = notification.userInfo() {
                     let app_key = NSString::from_str("NSWorkspaceApplicationKey");
                     if let Some(app_obj) = user_info.objectForKey(&app_key) {
-                        // Cast to NSRunningApplication
                         let app_ptr = Retained::as_ptr(&app_obj) as *const NSRunningApplication;
                         let app: &NSRunningApplication = &*app_ptr;
 
                         let bundle_id_str = app.bundleIdentifier().map(|s| s.to_string());
-                        println!("[Observer] App activated: {:?}", bundle_id_str);
 
                         let payload = if is_tab_manager(app, our_pid) {
-                            println!("[Observer] -> Detected as: tab_manager");
                             AppActivationPayload {
                                 app_type: "tab_manager".to_string(),
                                 bundle_id: None,
                             }
                         } else if is_target_app(app) {
-                            println!("[Observer] -> Detected as: vscode/cursor");
                             AppActivationPayload {
                                 app_type: "vscode".to_string(),
                                 bundle_id: bundle_id_str,
                             }
                         } else {
-                            println!("[Observer] -> Detected as: other");
                             AppActivationPayload {
                                 app_type: "other".to_string(),
                                 bundle_id: bundle_id_str,
                             }
                         };
 
-                        // Emit event to frontend
                         if let Some(window) = app_handle_clone.get_webview_window("main") {
-                            println!("[Observer] Emitting app-activated event: {:?}", payload.app_type);
                             let _ = window.emit("app-activated", payload);
-                        } else {
-                            println!("[Observer] Warning: Could not get main window for emit");
                         }
-                    } else {
-                        println!("[Observer] Warning: No app object in user info");
                     }
-                } else {
-                    println!("[Observer] Warning: No user info in notification");
                 }
             });
 
-        // Get the main operation queue to ensure block runs on main thread
         let main_queue = NSOperationQueue::mainQueue();
-        println!("[Observer] Got main operation queue");
 
         unsafe {
             notification_center.addObserverForName_object_queue_usingBlock(
                 Some(&notification_name),
                 None,
-                Some(&main_queue), // Use main queue instead of None
+                Some(&main_queue),
                 &block,
             );
         }
 
-        println!("[Observer] Notification observer registered successfully");
-
         // Send initial state
         if let Some(frontmost) = get_frontmost_app() {
             let bundle_id_str = frontmost.bundleIdentifier().map(|s| s.to_string());
-            println!("[Observer] Initial frontmost app: {:?}", bundle_id_str);
 
             let payload = if is_tab_manager(&frontmost, our_pid) {
                 AppActivationPayload {
@@ -156,25 +127,19 @@ pub fn start_observer(app_handle: AppHandle) {
             };
 
             if let Some(window) = app_handle.get_webview_window("main") {
-                println!("[Observer] Emitting initial app-activated event: {:?}", payload.app_type);
                 let _ = window.emit("app-activated", payload);
             }
         }
 
-        // Keep the thread alive - the block will be called on the main queue
-        // We use a simple sleep loop instead of a run loop since we're using NSOperationQueue
-        println!("[Observer] Entering keep-alive loop...");
+        // Keep the thread alive
         while OBSERVER_RUNNING.load(Ordering::SeqCst) {
             thread::sleep(std::time::Duration::from_millis(100));
         }
-
-        println!("[Observer] Observer stopped");
     });
 }
 
 /// Stop the workspace observer
 #[allow(dead_code)]
 pub fn stop_observer() {
-    println!("[Observer] Stopping observer...");
     OBSERVER_RUNNING.store(false, Ordering::SeqCst);
 }
