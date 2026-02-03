@@ -57,9 +57,16 @@ interface AppActivationPayload {
   bundle_id: string | null;
 }
 
+// Payload from claude-notification event
+interface ClaudeNotificationPayload {
+  waiting: boolean;
+  paths: string[];
+}
+
 function App() {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [badgeWindowNames, setBadgeWindowNames] = useState<Set<string>>(new Set());
   const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
@@ -310,6 +317,28 @@ function App() {
         }
       });
       cleanupFns.push(unlistenSwitch);
+
+      // Listen for Claude Code notification events
+      const unlistenClaude = await listen<ClaudeNotificationPayload>("claude-notification", (event) => {
+        if (isMounted) {
+          if (event.payload.waiting && event.payload.paths.length > 0) {
+            // Match waiting paths with window names
+            const matchedNames = windowsRef.current
+              .filter(w => {
+                return event.payload.paths.some(p => {
+                  // パスの末尾ディレクトリ名とウィンドウ名を比較
+                  const dirName = p.split('/').pop() || '';
+                  return w.name === dirName;
+                });
+              })
+              .map(w => w.name);
+            setBadgeWindowNames(new Set(matchedNames));
+          } else {
+            setBadgeWindowNames(new Set());
+          }
+        }
+      });
+      cleanupFns.push(unlistenClaude);
     };
 
     setupListeners();
@@ -394,6 +423,18 @@ function App() {
           // Fetch windows immediately when editor becomes active
           if (app_type === "vscode") {
             await fetchWindows(bundle_id);
+            // Clear Claude notification badge for the active window only
+            const activeWindow = windowsRef.current[activeIndexRef.current];
+            if (activeWindow && activeWindow.path) {
+              // Remove active window from badge set
+              setBadgeWindowNames(prev => {
+                const next = new Set(prev);
+                next.delete(activeWindow.name);
+                return next;
+              });
+              // Clear notification for this path
+              invoke("clear_claude_notification", { path: activeWindow.name }).catch(() => {});
+            }
           }
         } else {
           // Other app is active - hide the tab bar
@@ -431,6 +472,7 @@ function App() {
       onNewTab={handleNewTab}
       onCloseTab={handleCloseTab}
       onReorder={handleReorder}
+      badgeWindowNames={badgeWindowNames}
     />
   );
 }

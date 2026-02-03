@@ -10,9 +10,10 @@ interface TabBarProps {
   onNewTab: () => void;
   onCloseTab: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  badgeWindowNames?: Set<string>;
 }
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder }: TabBarProps) {
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, badgeWindowNames }: TabBarProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
@@ -75,6 +76,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             index={index}
+            hasBadge={badgeWindowNames?.has(tab.name)}
           />
         ))}
         <button

@@ -1,4 +1,5 @@
 mod editor;
+mod notification;
 mod observer;
 mod vscode;
 
@@ -61,6 +62,11 @@ fn open_new_editor(bundle_id: &str) -> Result<(), String> {
 #[tauri::command(rename_all = "snake_case")]
 fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
     vscode::close_editor_window(bundle_id, window_id)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn clear_claude_notification(path: Option<String>) {
+    notification::clear_notification_file_for_path(path.as_deref());
 }
 
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -145,7 +151,9 @@ pub fn run() {
             get_editor_state,
             focus_editor_window,
             open_new_editor,
-            close_editor_window
+            close_editor_window,
+            // Claude Code notification
+            clear_claude_notification
         ])
         .setup(|app| {
             if let Err(e) = setup_shortcuts(app.handle()) {
@@ -154,6 +162,9 @@ pub fn run() {
 
             // Start NSWorkspace observer for app activation events
             observer::start_observer(app.handle().clone());
+
+            // Start notification file watcher for Claude Code
+            notification::start_notification_watcher(app.handle().clone());
 
             Ok(())
         })

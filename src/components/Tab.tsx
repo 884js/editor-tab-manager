@@ -11,9 +11,10 @@ interface TabProps {
   onDragOver: (index: number) => void;
   onDrop: (index: number) => void;
   index: number;
+  hasBadge?: boolean;
 }
 
-const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index }: TabProps) {
+const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, hasBadge }: TabProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   const displayName = name || "Untitled";
@@ -54,6 +55,7 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       title={shortcutKey ? `${displayName} (${shortcutKey})` : displayName}
     >
       <span style={styles.tabName}>{displayName}</span>
+      {hasBadge && <div style={styles.badge} />}
       <button
         style={{
           ...styles.closeButton,
@@ -116,6 +118,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     transition: "opacity 0.15s, background 0.15s",
+    flexShrink: 0,
+  },
+  badge: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#ff3b30",
     flexShrink: 0,
   },
 };
