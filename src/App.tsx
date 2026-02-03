@@ -204,6 +204,15 @@ function App() {
         const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
+
+          // アクティブウィンドウが変わったらそのバッジをクリア
+          if (frontmostName) {
+            setBadgeWindowNames(prev => {
+              const next = new Set(prev);
+              next.delete(frontmostName);
+              return next;
+            });
+          }
         }
       }
       isInitializedRef.current = true;
@@ -365,6 +374,13 @@ function App() {
       const unlistenClaude = await listen<ClaudeNotificationPayload>("claude-notification", (event) => {
         if (isMounted) {
           if (event.payload.waiting && event.payload.paths.length > 0) {
+            // 現在アクティブなウィンドウの名前を取得
+            // エディタ（VSCode/Cursor等）がアクティブな場合のみ除外対象とする
+            const activeWindow = windowsRef.current[activeIndexRef.current];
+            const activeWindowName = (isVSCodeActiveRef.current && activeWindow)
+              ? activeWindow.name
+              : null;
+
             // Match waiting paths with window names
             const matchedNames = windowsRef.current
               .filter(w => {
@@ -374,7 +390,8 @@ function App() {
                   return w.name === dirName;
                 });
               })
-              .map(w => w.name);
+              .map(w => w.name)
+              .filter(name => name !== activeWindowName); // アクティブウィンドウを除外
             setBadgeWindowNames(new Set(matchedNames));
           } else {
             setBadgeWindowNames(new Set());
@@ -527,7 +544,7 @@ function App() {
     const startDelay = setTimeout(() => {
       intervalId = setInterval(async () => {
         await pollEditorState(appWindow);
-      }, 1000); // 1000ms polling (events provide faster response when working)
+      }, 500); // 500ms polling for faster tab switch response
     }, 2000);
 
     return () => {
