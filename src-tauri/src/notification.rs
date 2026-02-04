@@ -1,12 +1,22 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 
 static NOTIFICATION_WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 const CLAUDE_WAITING_FILE: &str = "/tmp/claude-code-waiting";
+const NOTIFICATION_THROTTLE_SECS: u64 = 5;
+
+// Track which paths have been notified recently to avoid spam
+lazy_static::lazy_static! {
+    static ref LAST_NOTIFICATION_TIME: Mutex<Option<Instant>> = Mutex::new(None);
+    static ref NOTIFIED_PATHS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
+}
 
 /// Payload for Claude Code notification events
 #[derive(Clone, serde::Serialize)]
@@ -62,9 +72,17 @@ pub fn start_notification_watcher(app_handle: AppHandle) {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let payload = ClaudeNotificationPayload {
                         waiting,
-                        paths,
+                        paths: paths.clone(),
                     };
                     let _ = window.emit("claude-notification", payload);
+                }
+
+                // Send system notification if editor is not active
+                if waiting {
+                    send_system_notification(&app_handle, &paths);
+                } else {
+                    // Clear notified paths when no longer waiting
+                    clear_notified_paths(&paths);
                 }
             }
 
@@ -124,4 +142,61 @@ pub fn clear_notification_file() {
 #[allow(dead_code)]
 pub fn stop_notification_watcher() {
     NOTIFICATION_WATCHER_RUNNING.store(false, Ordering::SeqCst);
+}
+
+/// Check if throttling should apply (returns true if we should skip notification)
+fn should_throttle() -> bool {
+    let mut last_time = LAST_NOTIFICATION_TIME.lock().unwrap();
+    if let Some(time) = *last_time {
+        if time.elapsed().as_secs() < NOTIFICATION_THROTTLE_SECS {
+            return true;
+        }
+    }
+    *last_time = Some(Instant::now());
+    false
+}
+
+/// Send system notification for waiting projects
+fn send_system_notification(app_handle: &AppHandle, paths: &[String]) {
+    // Check if any editor is active - if so, don't send system notification
+    if crate::vscode::is_vscode_active() {
+        return;
+    }
+
+    // Check throttling
+    if should_throttle() {
+        return;
+    }
+
+    // Filter out paths that were already notified
+    let mut notified = NOTIFIED_PATHS.lock().unwrap();
+    let new_paths: Vec<&String> = paths
+        .iter()
+        .filter(|p| !notified.contains(*p))
+        .collect();
+
+    if new_paths.is_empty() {
+        return;
+    }
+
+    // Send notification for each new path
+    for path in &new_paths {
+        let project_name = path.split('/').last().unwrap_or(path);
+
+        let _ = app_handle
+            .notification()
+            .builder()
+            .title("Claude Code")
+            .body(&format!("入力待ち: {}", project_name))
+            .show();
+
+        notified.insert((*path).clone());
+    }
+}
+
+/// Clear notified paths when they are no longer waiting
+fn clear_notified_paths(current_paths: &[String]) {
+    let mut notified = NOTIFIED_PATHS.lock().unwrap();
+    let current_set: HashSet<String> = current_paths.iter().cloned().collect();
+    notified.retain(|p| current_set.contains(p));
 }

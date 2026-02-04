@@ -5,6 +5,7 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { currentMonitor } from "@tauri-apps/api/window";
 import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
+import { onAction, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 
@@ -100,6 +101,7 @@ function App() {
   const isVSCodeActiveRef = useRef(false); // Track if VSCode/Cursor is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
+  const badgeWindowNamesRef = useRef<Set<string>>(new Set()); // Track badge window names for notification click handler
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -109,6 +111,10 @@ function App() {
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
+
+  useEffect(() => {
+    badgeWindowNamesRef.current = badgeWindowNames;
+  }, [badgeWindowNames]);
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -321,6 +327,39 @@ function App() {
   useEffect(() => {
     handleTabClickRef.current = handleTabClick;
   }, [handleTabClick]);
+
+  // Setup notification permission and click handler
+  useEffect(() => {
+    const setupNotifications = async () => {
+      // Check and request notification permission
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+
+      if (permissionGranted) {
+        // Handle notification click - focus the first waiting project's editor window
+        onAction((_action) => {
+          // When notification is clicked, focus the first window with a badge
+          const windowsWithBadge = windowsRef.current.filter(w =>
+            badgeWindowNamesRef.current.has(w.name)
+          );
+          if (windowsWithBadge.length > 0) {
+            const targetWindow = windowsWithBadge[0];
+            const bundleId = currentBundleIdRef.current;
+            if (bundleId) {
+              invoke("focus_editor_window", { bundle_id: bundleId, window_id: targetWindow.id });
+            } else {
+              invoke("focus_vscode_window", { window_id: targetWindow.id });
+            }
+          }
+        });
+      }
+    };
+
+    setupNotifications();
+  }, []);
 
   // Setup event listeners - only once on mount
   useEffect(() => {
