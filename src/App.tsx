@@ -97,6 +97,7 @@ function App() {
   const isInitializedRef = useRef(false);
   const tabOrderRef = useRef<string[]>([]);
   const isEditorActiveRef = useRef(false); // Track if editor (VSCode/Cursor) is currently active
+  const isTabManagerActiveRef = useRef(false); // Track if tab_manager itself is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
 
@@ -211,11 +212,16 @@ function App() {
 
       const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
 
-      // Update isEditorActiveRef based on state (root cause fix)
-      isEditorActiveRef.current = state.is_active;
+      // Update isEditorActiveRef based on state (only when tab_manager is not active)
+      // When tab_manager is active, polling should not override the flag set by observer
+      if (!isTabManagerActiveRef.current) {
+        isEditorActiveRef.current = state.is_active;
+      }
 
-      // Update visibility
-      if (state.is_active && !isVisibleRef.current) {
+      // Update visibility (タブマネージャーアクティブ時はスキップ)
+      if (isTabManagerActiveRef.current) {
+        // Tab manager is active - skip visibility control, observer handles it
+      } else if (state.is_active && !isVisibleRef.current) {
         await appWindow.show();
         isVisibleRef.current = true;
       } else if (!state.is_active && isVisibleRef.current) {
@@ -528,7 +534,9 @@ function App() {
 
         if (app_type === "editor" || app_type === "tab_manager") {
           // Editor or our app is active - show the tab bar
+          // Tab Manager active = user is operating the tab bar, so keep it visible
           isEditorActiveRef.current = app_type === "editor";
+          isTabManagerActiveRef.current = app_type === "tab_manager";
           if (app_type === "editor" && bundle_id) {
             // Reload order from store if bundle changed
             if (bundle_id !== currentBundleIdRef.current) {
@@ -560,6 +568,7 @@ function App() {
         } else {
           // Other app is active - hide the tab bar
           isEditorActiveRef.current = false;
+          isTabManagerActiveRef.current = false;
           if (isVisibleRef.current) {
             await appWindow.hide();
             isVisibleRef.current = false;
