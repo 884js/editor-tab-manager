@@ -16,9 +16,6 @@ pub struct EditorState {
     pub active_index: Option<usize>,  // Index of the frontmost window after sorting
 }
 
-// Type aliases for backward compatibility
-pub type VSCodeWindow = EditorWindow;
-pub type VSCodeState = EditorState;
 
 /// Build list of process names for is_active check
 fn build_active_check_condition() -> String {
@@ -35,6 +32,29 @@ fn build_active_check_condition() -> String {
     conditions.push("(frontApp is \"Editor Tab Manager\")".to_string());
     conditions.push("(frontApp is \"editor-tab-manager\")".to_string());
     conditions.join(" or ")
+}
+
+/// Get editor state for any running editor (tries each editor in order)
+pub fn get_any_editor_state() -> EditorState {
+    for editor in EDITORS {
+        let state = get_editor_state_with_config(editor);
+        if !state.windows.is_empty() || state.is_active {
+            return state;
+        }
+    }
+    // Default to first editor (VSCode) if none running
+    get_editor_state_with_config(&EDITORS[0])
+}
+
+/// Get windows from any running editor (tries each editor in order)
+pub fn get_any_editor_windows() -> Vec<EditorWindow> {
+    for editor in EDITORS {
+        let windows = get_editor_windows_with_config(editor);
+        if !windows.is_empty() {
+            return windows;
+        }
+    }
+    vec![]
 }
 
 /// Get editor state for a specific editor by bundle_id
@@ -137,21 +157,9 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
     }
 }
 
-/// Get VSCode state (backward compatible - uses first available editor)
-pub fn get_vscode_state() -> VSCodeState {
-    // Try to get state from any running editor
-    for editor in EDITORS {
-        let state = get_editor_state_with_config(editor);
-        if !state.windows.is_empty() || state.is_active {
-            return state;
-        }
-    }
-    // Default to first editor (VSCode)
-    get_editor_state_with_config(&EDITORS[0])
-}
 
 /// Check if any supported editor or Tab Manager is the frontmost application
-pub fn is_vscode_active() -> bool {
+pub fn is_editor_active() -> bool {
     let script = r#"
         tell application "System Events"
             set frontApp to name of first application process whose frontmost is true
@@ -274,17 +282,6 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
     }
 }
 
-/// Get all VSCode windows (backward compatible - uses first available editor)
-pub fn get_vscode_windows() -> Vec<VSCodeWindow> {
-    // Try to get windows from any running editor
-    for editor in EDITORS {
-        let windows = get_editor_windows_with_config(editor);
-        if !windows.is_empty() {
-            return windows;
-        }
-    }
-    vec![]
-}
 
 /// Extract project name from editor window title
 fn extract_project_name(title: &str, config: &EditorConfig) -> String {
@@ -349,18 +346,6 @@ pub fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String
     }
 }
 
-/// Focus a specific VSCode window (backward compatible)
-pub fn focus_vscode_window(window_id: i32) -> Result<(), String> {
-    // Try VSCode first, then Cursor
-    for editor in EDITORS {
-        let windows = get_editor_windows_with_config(editor);
-        if windows.iter().any(|w| w.id == window_id) {
-            return focus_editor_window(editor.bundle_id, window_id);
-        }
-    }
-    // Default to VSCode
-    focus_editor_window(EDITORS[0].bundle_id, window_id)
-}
 
 /// Open a new editor window
 pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
@@ -392,17 +377,6 @@ pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
     }
 }
 
-/// Open a new VSCode window (backward compatible)
-pub fn open_new_vscode() -> Result<(), String> {
-    // Use the first available running editor, or default to VSCode
-    for editor in EDITORS {
-        let windows = get_editor_windows_with_config(editor);
-        if !windows.is_empty() {
-            return open_new_editor(editor.bundle_id);
-        }
-    }
-    open_new_editor(EDITORS[0].bundle_id)
-}
 
 /// Close a specific editor window
 pub fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
@@ -435,15 +409,3 @@ pub fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String
     }
 }
 
-/// Close a specific VSCode window (backward compatible)
-pub fn close_vscode_window(window_id: i32) -> Result<(), String> {
-    // Try to find which editor has this window
-    for editor in EDITORS {
-        let windows = get_editor_windows_with_config(editor);
-        if windows.iter().any(|w| w.id == window_id) {
-            return close_editor_window(editor.bundle_id, window_id);
-        }
-    }
-    // Default to VSCode
-    close_editor_window(EDITORS[0].bundle_id, window_id)
-}

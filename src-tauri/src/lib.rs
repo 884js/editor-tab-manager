@@ -7,48 +7,23 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use vscode::{EditorState, EditorWindow, VSCodeState, VSCodeWindow};
+use vscode::{EditorState, EditorWindow};
 
-// Legacy commands (backward compatible)
+// Editor commands with optional bundle_id support
 #[tauri::command(rename_all = "snake_case")]
-fn get_vscode_windows() -> Vec<VSCodeWindow> {
-    vscode::get_vscode_windows()
+fn get_editor_windows(bundle_id: Option<&str>) -> Vec<EditorWindow> {
+    match bundle_id {
+        Some(id) => vscode::get_editor_windows(id),
+        None => vscode::get_any_editor_windows(),
+    }
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn get_vscode_state() -> VSCodeState {
-    vscode::get_vscode_state()
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn focus_vscode_window(window_id: i32) -> Result<(), String> {
-    vscode::focus_vscode_window(window_id)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn open_new_vscode() -> Result<(), String> {
-    vscode::open_new_vscode()
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn close_vscode_window(window_id: i32) -> Result<(), String> {
-    vscode::close_vscode_window(window_id)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn is_vscode_active() -> bool {
-    vscode::is_vscode_active()
-}
-
-// New commands with bundle_id support
-#[tauri::command(rename_all = "snake_case")]
-fn get_editor_windows(bundle_id: &str) -> Vec<EditorWindow> {
-    vscode::get_editor_windows(bundle_id)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn get_editor_state(bundle_id: &str) -> EditorState {
-    vscode::get_editor_state(bundle_id)
+fn get_editor_state(bundle_id: Option<&str>) -> EditorState {
+    match bundle_id {
+        Some(id) => vscode::get_editor_state(id),
+        None => vscode::get_any_editor_state(),
+    }
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -67,6 +42,11 @@ fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+fn is_editor_active() -> bool {
+    vscode::is_editor_active()
+}
+
+#[tauri::command(rename_all = "snake_case")]
 fn clear_claude_notification(path: Option<String>) {
     notification::clear_notification_file_for_path(path.as_deref());
 }
@@ -81,7 +61,7 @@ fn open_file_in_default_app(path: String) -> Result<(), String> {
 }
 
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    // Cmd+Shift+T: New VSCode window
+    // Cmd+Shift+T: New editor window
     let new_tab_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
 
     // Cmd+W: Close current tab
@@ -119,9 +99,9 @@ fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             if shortcut == &new_tab_shortcut {
-                let _ = vscode::open_new_vscode();
+                // Emit event to frontend, which knows the current bundle_id
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.emit("refresh-windows", ());
+                    let _ = window.emit("open-new-editor-tab", ());
                 }
             } else if shortcut == &close_tab_shortcut {
                 if let Some(window) = app_handle.get_webview_window("main") {
@@ -151,19 +131,13 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
-            // Legacy commands (backward compatible)
-            get_vscode_windows,
-            get_vscode_state,
-            focus_vscode_window,
-            open_new_vscode,
-            close_vscode_window,
-            is_vscode_active,
-            // New commands with bundle_id support
+            // Editor commands with bundle_id support
             get_editor_windows,
             get_editor_state,
             focus_editor_window,
             open_new_editor,
             close_editor_window,
+            is_editor_active,
             // Claude Code notification
             clear_claude_notification,
             // File operations
