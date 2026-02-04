@@ -1,4 +1,4 @@
-use crate::editor::is_supported_editor;
+use crate::editor_config::is_supported_editor;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue};

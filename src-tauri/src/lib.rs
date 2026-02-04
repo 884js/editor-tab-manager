@@ -1,49 +1,49 @@
 mod editor;
+mod editor_config;
 mod notification;
 mod observer;
-mod vscode;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use vscode::{EditorState, EditorWindow};
+use editor::{EditorState, EditorWindow};
 
 // Editor commands with optional bundle_id support
 #[tauri::command(rename_all = "snake_case")]
 fn get_editor_windows(bundle_id: Option<&str>) -> Vec<EditorWindow> {
     match bundle_id {
-        Some(id) => vscode::get_editor_windows(id),
-        None => vscode::get_any_editor_windows(),
+        Some(id) => editor::get_editor_windows(id),
+        None => editor::get_any_editor_windows(),
     }
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn get_editor_state(bundle_id: Option<&str>) -> EditorState {
     match bundle_id {
-        Some(id) => vscode::get_editor_state(id),
-        None => vscode::get_any_editor_state(),
+        Some(id) => editor::get_editor_state(id),
+        None => editor::get_any_editor_state(),
     }
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
-    vscode::focus_editor_window(bundle_id, window_id)
+    editor::focus_editor_window(bundle_id, window_id)
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn open_new_editor(bundle_id: &str) -> Result<(), String> {
-    vscode::open_new_editor(bundle_id)
+    editor::open_new_editor(bundle_id)
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
-    vscode::close_editor_window(bundle_id, window_id)
+    editor::close_editor_window(bundle_id, window_id)
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn is_editor_active() -> bool {
-    vscode::is_editor_active()
+    editor::is_editor_active()
 }
 
 #[tauri::command(rename_all = "snake_case")]
