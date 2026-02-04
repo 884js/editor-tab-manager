@@ -14,9 +14,6 @@ export interface EditorWindow {
   path: string;
 }
 
-// Type alias for backward compatibility
-export type VSCodeWindow = EditorWindow;
-
 interface EditorState {
   is_active: boolean;
   windows: EditorWindow[];
@@ -77,7 +74,7 @@ function sortWindowsByOrder(windows: EditorWindow[], order: string[]): EditorWin
 
 // Payload from app-activated event
 interface AppActivationPayload {
-  app_type: "vscode" | "tab_manager" | "other";
+  app_type: "editor" | "tab_manager" | "other";
   bundle_id: string | null;
 }
 
@@ -97,7 +94,7 @@ function App() {
   const isVisibleRef = useRef(true);
   const isInitializedRef = useRef(false);
   const tabOrderRef = useRef<string[]>([]);
-  const isVSCodeActiveRef = useRef(false); // Track if VSCode/Cursor is currently active
+  const isEditorActiveRef = useRef(false); // Track if editor (VSCode/Cursor) is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
 
@@ -120,9 +117,7 @@ function App() {
         orderLoadedRef.current = true;
       }
 
-      const result = bundleId
-        ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: bundleId })
-        : await invoke<EditorWindow[]>("get_vscode_windows");
+      const result = await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: bundleId });
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order with current windows (remove deleted, keep order for existing)
@@ -162,12 +157,10 @@ function App() {
         orderLoadedRef.current = true;
       }
 
-      const state = bundleId
-        ? await invoke<EditorState>("get_editor_state", { bundle_id: bundleId })
-        : await invoke<EditorState>("get_vscode_state");
+      const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
 
-      // Update isVSCodeActiveRef based on state (root cause fix)
-      isVSCodeActiveRef.current = state.is_active;
+      // Update isEditorActiveRef based on state (root cause fix)
+      isEditorActiveRef.current = state.is_active;
 
       // Update visibility
       if (state.is_active && !isVisibleRef.current) {
@@ -227,27 +220,25 @@ function App() {
     const window = windowsRef.current[index];
     if (window) {
       const bundleId = currentBundleIdRef.current;
-      // Fire-and-forget: don't await, let UI respond immediately
-      if (bundleId) {
-        invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
-          console.error("Failed to focus window:", error);
-        });
-      } else {
-        invoke("focus_vscode_window", { window_id: window.id }).catch((error) => {
-          console.error("Failed to focus window:", error);
-        });
+      if (!bundleId) {
+        console.warn("No bundle_id available, cannot focus window");
+        return;
       }
+      // Fire-and-forget: don't await, let UI respond immediately
+      invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
+        console.error("Failed to focus window:", error);
+      });
     }
   }, []);
 
   const handleNewTab = useCallback(async () => {
     try {
       const bundleId = currentBundleIdRef.current;
-      if (bundleId) {
-        await invoke("open_new_editor", { bundle_id: bundleId });
-      } else {
-        await invoke("open_new_vscode");
+      if (!bundleId) {
+        console.warn("No bundle_id available, cannot open new editor window");
+        return;
       }
+      await invoke("open_new_editor", { bundle_id: bundleId });
       setTimeout(refreshWindows, 1000);
     } catch (error) {
       console.error("Failed to open new editor:", error);
@@ -259,11 +250,11 @@ function App() {
     if (window) {
       try {
         const bundleId = currentBundleIdRef.current;
-        if (bundleId) {
-          await invoke("close_editor_window", { bundle_id: bundleId, window_id: window.id });
-        } else {
-          await invoke("close_vscode_window", { window_id: window.id });
+        if (!bundleId) {
+          console.warn("No bundle_id available, cannot close window");
+          return;
         }
+        await invoke("close_editor_window", { bundle_id: bundleId, window_id: window.id });
         setTimeout(refreshWindows, 500);
       } catch (error) {
         console.error("Failed to close window:", error);
@@ -309,6 +300,7 @@ function App() {
   const refreshWindowsRef = useRef(refreshWindows);
   const handleCloseTabRef = useRef(handleCloseTab);
   const handleTabClickRef = useRef(handleTabClick);
+  const handleNewTabRef = useRef(handleNewTab);
 
   useEffect(() => {
     refreshWindowsRef.current = refreshWindows;
@@ -321,6 +313,10 @@ function App() {
   useEffect(() => {
     handleTabClickRef.current = handleTabClick;
   }, [handleTabClick]);
+
+  useEffect(() => {
+    handleNewTabRef.current = handleNewTab;
+  }, [handleNewTab]);
 
   // Setup event listeners - only once on mount
   useEffect(() => {
@@ -337,17 +333,21 @@ function App() {
       });
       cleanupFns.push(unlistenRefresh);
 
+      // Listen for open-new-editor-tab event (from Cmd+Shift+T shortcut)
+      const unlistenNewTab = await listen("open-new-editor-tab", () => {
+        if (isMounted) {
+          handleNewTabRef.current();
+        }
+      });
+      cleanupFns.push(unlistenNewTab);
+
       const unlistenClose = await listen("close-current-tab", () => {
         if (isMounted) {
           const currentIndex = activeIndexRef.current;
           const currentWindows = windowsRef.current;
-          if (currentWindows[currentIndex]) {
-            const bundleId = currentBundleIdRef.current;
-            if (bundleId) {
-              invoke("close_editor_window", { bundle_id: bundleId, window_id: currentWindows[currentIndex].id });
-            } else {
-              invoke("close_vscode_window", { window_id: currentWindows[currentIndex].id });
-            }
+          const bundleId = currentBundleIdRef.current;
+          if (currentWindows[currentIndex] && bundleId) {
+            invoke("close_editor_window", { bundle_id: bundleId, window_id: currentWindows[currentIndex].id });
             setTimeout(() => refreshWindowsRef.current(), 500);
           }
         }
@@ -358,13 +358,9 @@ function App() {
         if (isMounted && event.payload < windowsRef.current.length) {
           setActiveIndex(event.payload);
           const win = windowsRef.current[event.payload];
-          if (win) {
-            const bundleId = currentBundleIdRef.current;
-            if (bundleId) {
-              invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
-            } else {
-              invoke("focus_vscode_window", { window_id: win.id });
-            }
+          const bundleId = currentBundleIdRef.current;
+          if (win && bundleId) {
+            invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
           }
         }
       });
@@ -377,7 +373,7 @@ function App() {
             // 現在アクティブなウィンドウの名前を取得
             // エディタ（VSCode/Cursor等）がアクティブな場合のみ除外対象とする
             const activeWindow = windowsRef.current[activeIndexRef.current];
-            const activeWindowName = (isVSCodeActiveRef.current && activeWindow)
+            const activeWindowName = (isEditorActiveRef.current && activeWindow)
               ? activeWindow.name
               : null;
 
@@ -420,9 +416,7 @@ function App() {
         orderLoadedRef.current = true;
       }
 
-      const result = targetBundleId
-        ? await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: targetBundleId })
-        : await invoke<EditorWindow[]>("get_vscode_windows");
+      const result = await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: targetBundleId });
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order ref but don't save to store - only save on explicit reorder
@@ -475,10 +469,10 @@ function App() {
 
         const { app_type, bundle_id } = event.payload;
 
-        if (app_type === "vscode" || app_type === "tab_manager") {
+        if (app_type === "editor" || app_type === "tab_manager") {
           // Editor or our app is active - show the tab bar
-          isVSCodeActiveRef.current = app_type === "vscode";
-          if (app_type === "vscode" && bundle_id) {
+          isEditorActiveRef.current = app_type === "editor";
+          if (app_type === "editor" && bundle_id) {
             // Reload order from store if bundle changed
             if (bundle_id !== currentBundleIdRef.current) {
               orderLoadedRef.current = false;
@@ -491,7 +485,7 @@ function App() {
             isVisibleRef.current = true;
           }
           // Fetch windows immediately when editor becomes active
-          if (app_type === "vscode") {
+          if (app_type === "editor") {
             await fetchWindows(bundle_id);
             // Clear Claude notification badge for the active window only
             const activeWindow = windowsRef.current[activeIndexRef.current];
@@ -508,7 +502,7 @@ function App() {
           }
         } else {
           // Other app is active - hide the tab bar
-          isVSCodeActiveRef.current = false;
+          isEditorActiveRef.current = false;
           if (isVisibleRef.current) {
             await appWindow.hide();
             isVisibleRef.current = false;

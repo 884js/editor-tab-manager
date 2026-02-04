@@ -1,4 +1,4 @@
-use crate::editor::is_supported_editor;
+use crate::editor_config::is_supported_editor;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue};
@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 static OBSERVER_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Check if the given app is a supported editor (VSCode, Cursor, etc.)
+/// Check if the given app is a supported editor (VSCode, Cursor, etc)
 fn is_target_app(app: &NSRunningApplication) -> bool {
     if let Some(bundle_id) = app.bundleIdentifier() {
         return is_supported_editor(&bundle_id.to_string());
@@ -32,7 +32,7 @@ fn get_frontmost_app() -> Option<Retained<NSRunningApplication>> {
 /// Payload for app activation events
 #[derive(Clone, serde::Serialize)]
 pub struct AppActivationPayload {
-    pub app_type: String, // "vscode", "tab_manager", or "other"
+    pub app_type: String, // "editor", "tab_manager", or "other"
     pub bundle_id: Option<String>,
 }
 
@@ -70,7 +70,7 @@ pub fn start_observer(app_handle: AppHandle) {
                 }
             } else if is_target_app(&app) {
                 AppActivationPayload {
-                    app_type: "vscode".to_string(),
+                    app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                 }
             } else {
@@ -108,7 +108,7 @@ pub fn start_observer(app_handle: AppHandle) {
                 }
             } else if is_target_app(&frontmost) {
                 AppActivationPayload {
-                    app_type: "vscode".to_string(),
+                    app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                 }
             } else {

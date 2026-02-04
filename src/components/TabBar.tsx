@@ -1,10 +1,10 @@
 import { useState, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Tab from "./Tab";
-import type { VSCodeWindow } from "../App";
+import type { EditorWindow } from "../App";
 
 interface TabBarProps {
-  tabs: VSCodeWindow[];
+  tabs: EditorWindow[];
   activeIndex: number;
   onTabClick: (index: number) => void;
   onNewTab: () => void;
@@ -83,7 +83,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           style={styles.addButton}
           onClick={onNewTab}
           onMouseDown={(e) => e.stopPropagation()}
-          title="新しいVSCodeを開く (Cmd+Shift+T)"
+          title="新しいエディタウィンドウを開く (Cmd+Shift+T)"
         >
           +
         </button>
