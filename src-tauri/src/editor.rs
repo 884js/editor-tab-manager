@@ -1,6 +1,6 @@
+use crate::ax_helper;
 use crate::editor_config::{EditorConfig, EDITORS};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorWindow {
@@ -13,25 +13,7 @@ pub struct EditorWindow {
 pub struct EditorState {
     pub is_active: bool,
     pub windows: Vec<EditorWindow>,
-    pub active_index: Option<usize>,  // Index of the frontmost window after sorting
-}
-
-
-/// Build list of process names for is_active check
-fn build_active_check_condition() -> String {
-    let mut conditions: Vec<String> = Vec::new();
-    for editor in EDITORS {
-        conditions.push(format!("(frontApp is \"{}\")", editor.process_name));
-        if editor.id == "vscode" {
-            // VSCode has additional process name variants
-            conditions.push("(frontApp is \"Electron\")".to_string());
-            conditions.push("(frontApp contains \"Visual Studio Code\")".to_string());
-        }
-    }
-    // Also include our tab manager
-    conditions.push("(frontApp is \"Editor Tab Manager\")".to_string());
-    conditions.push("(frontApp is \"editor-tab-manager\")".to_string());
-    conditions.join(" or ")
+    pub active_index: Option<usize>,
 }
 
 /// Get editor state for any running editor (tries each editor in order)
@@ -61,7 +43,6 @@ pub fn get_any_editor_windows() -> Vec<EditorWindow> {
 pub fn get_editor_state(bundle_id: &str) -> EditorState {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id);
 
-    // If bundle_id is not found, return empty state
     let config = match config {
         Some(c) => c,
         None => return EditorState { is_active: false, windows: vec![], active_index: None },
@@ -72,131 +53,48 @@ pub fn get_editor_state(bundle_id: &str) -> EditorState {
 
 /// Get editor state using a specific EditorConfig
 pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
-    let active_check = build_active_check_condition();
+    let is_active = is_editor_active();
 
-    let script = format!(r#"
-        tell application "System Events"
-            set frontApp to name of first application process whose frontmost is true
-            set isActive to {}
+    let pid = match ax_helper::get_pid_by_bundle_id(config.bundle_id) {
+        Some(pid) => pid,
+        None => return EditorState { is_active, windows: vec![], active_index: None },
+    };
 
-            set windowsData to ""
-            if exists process "{}" then
-                tell process "{}"
-                    set windowIndex to 1
-                    repeat with w in windows
-                        set windowTitle to name of w
-                        if windowIndex > 1 then
-                            set windowsData to windowsData & "@@@"
-                        end if
-                        set windowsData to windowsData & (windowIndex as text) & "|||" & windowTitle
-                        set windowIndex to windowIndex + 1
-                    end repeat
-                end tell
-            end if
+    let ax_windows = match ax_helper::get_windows_ax(pid) {
+        Ok(w) => w,
+        Err(_) => return EditorState { is_active, windows: vec![], active_index: None },
+    };
 
-            return (isActive as text) & "<SEP>" & windowsData
-        end tell
-    "#, active_check, config.process_name, config.process_name);
+    let mut active_index: Option<usize> = None;
+    let mut windows = Vec::new();
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
-
-    match output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let parts: Vec<&str> = stdout.splitn(2, "<SEP>").collect();
-
-            let is_active = parts.first().map(|s| *s == "true").unwrap_or(false);
-            let windows_data = parts.get(1).unwrap_or(&"");
-
-            let (windows, active_index) = if windows_data.is_empty() {
-                (vec![], None)
-            } else {
-                let windows_with_index: Vec<(i32, EditorWindow)> = windows_data
-                    .split("@@@")
-                    .filter_map(|entry| {
-                        let parts: Vec<&str> = entry.split("|||").collect();
-                        if parts.len() >= 2 {
-                            let original_index = parts[0].parse::<i32>().unwrap_or(0);
-                            let title = parts[1].to_string();
-
-                            // Filter out temporary/transient windows
-                            if title.is_empty() || title == "Untitled" {
-                                return None;
-                            }
-
-                            let name = extract_project_name(&title, config);
-                            Some((original_index, EditorWindow {
-                                id: original_index,
-                                name,
-                                path: title,
-                            }))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // Find the index of the frontmost window (original index 1)
-                let active_idx = windows_with_index.iter()
-                    .position(|(original_idx, _)| *original_idx == 1);
-
-                let windows = windows_with_index.into_iter().map(|(idx, mut w)| {
-                    w.id = idx;
-                    w
-                }).collect();
-
-                (windows, active_idx)
-            };
-
-            EditorState { is_active, windows, active_index }
+    for (idx, (title, is_frontmost)) in ax_windows.iter().enumerate() {
+        // Filter out temporary/transient windows
+        if title.is_empty() || title == "Untitled" {
+            continue;
         }
-        Err(_) => EditorState { is_active: false, windows: vec![], active_index: None },
-    }
-}
 
+        let name = extract_project_name(title, config);
+        let window_id = (idx + 1) as i32; // 1-based index for compatibility
+
+        windows.push(EditorWindow {
+            id: window_id,
+            name,
+            path: title.clone(),
+        });
+
+        if *is_frontmost {
+            active_index = Some(windows.len() - 1);
+        }
+    }
+
+    EditorState { is_active, windows, active_index }
+}
 
 /// Check if any supported editor or Tab Manager is the frontmost application
 pub fn is_editor_active() -> bool {
-    let script = r#"
-        tell application "System Events"
-            set frontApp to name of first application process whose frontmost is true
-            return frontApp
-        end tell
-    "#;
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output();
-
-    match output {
-        Ok(output) => {
-            let app_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-            // Check if it's our tab manager
-            if app_name == "Editor Tab Manager" || app_name == "editor-tab-manager" {
-                return true;
-            }
-
-            // Check if it's any supported editor
-            for editor in EDITORS {
-                if app_name == editor.process_name || app_name == editor.app_name {
-                    return true;
-                }
-                // VSCode-specific checks
-                if editor.id == "vscode" {
-                    if app_name == "Electron" || app_name.contains("Visual Studio Code") {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
-        Err(_) => false,
-    }
+    let editor_bundle_ids: Vec<&str> = EDITORS.iter().map(|e| e.bundle_id).collect();
+    ax_helper::is_editor_frontmost(&editor_bundle_ids)
 }
 
 /// Get windows for a specific editor by bundle_id
@@ -211,77 +109,36 @@ pub fn get_editor_windows(bundle_id: &str) -> Vec<EditorWindow> {
 
 /// Get windows using a specific EditorConfig
 pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow> {
-    let script = format!(r#"
-        tell application "System Events"
-            if not (exists process "{}") then
-                return ""
-            end if
-            tell process "{}"
-                set resultText to ""
-                set windowIndex to 1
-                repeat with w in windows
-                    set windowTitle to name of w
-                    if windowIndex > 1 then
-                        set resultText to resultText & "@@@"
-                    end if
-                    set resultText to resultText & (windowIndex as text) & "|||" & windowTitle
-                    set windowIndex to windowIndex + 1
-                end repeat
-                return resultText
-            end tell
-        end tell
-    "#, config.process_name, config.process_name);
+    let pid = match ax_helper::get_pid_by_bundle_id(config.bundle_id) {
+        Some(pid) => pid,
+        None => return vec![],
+    };
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
+    let ax_windows = match ax_helper::get_windows_ax(pid) {
+        Ok(w) => w,
+        Err(_) => return vec![],
+    };
 
-    match output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if stdout.is_empty() {
-                return vec![];
+    ax_windows
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, (title, _))| {
+            // Filter out temporary/transient windows
+            if title.is_empty() || title == "Untitled" {
+                return None;
             }
 
-            // Collect windows with their original AppleScript index
-            let windows_with_index: Vec<(i32, EditorWindow)> = stdout
-                .split("@@@")
-                .filter_map(|entry| {
-                    let parts: Vec<&str> = entry.split("|||").collect();
-                    if parts.len() >= 2 {
-                        let original_index = parts[0].parse::<i32>().unwrap_or(0);
-                        let title = parts[1].to_string();
+            let name = extract_project_name(title, config);
+            let window_id = (idx + 1) as i32; // 1-based index
 
-                        // Filter out temporary/transient windows
-                        if title.is_empty() || title == "Untitled" {
-                            return None;
-                        }
-
-                        // Extract project name from title
-                        let name = extract_project_name(&title, config);
-
-                        Some((original_index, EditorWindow {
-                            id: original_index, // Will be updated after sorting
-                            name,
-                            path: title,
-                        }))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Keep the original AppleScript index as ID (sorting is handled by frontend)
-            windows_with_index.into_iter().map(|(original_index, mut w)| {
-                w.id = original_index;
-                w
-            }).collect()
-        }
-        Err(_) => vec![],
-    }
+            Some(EditorWindow {
+                id: window_id,
+                name,
+                path: title.clone(),
+            })
+        })
+        .collect()
 }
-
 
 /// Extract project name from editor window title
 fn extract_project_name(title: &str, config: &EditorConfig) -> String {
@@ -332,93 +189,36 @@ pub fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
-    let script = format!(
-        r#"
-        tell application "System Events"
-            tell process "{}"
-                set targetWindow to window {}
-                set value of attribute "AXMain" of targetWindow to true
-                set frontmost to true
-            end tell
-        end tell
-        tell application "{}" to activate
-        "#,
-        config.process_name, window_id, config.app_name
-    );
+    let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
+        .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| e.to_string())?;
+    // Convert 1-based window_id to 0-based index
+    let window_index = (window_id - 1) as usize;
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+    ax_helper::focus_window_ax(pid, window_index)
 }
-
 
 /// Open a new editor window
 pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
-    let script = format!(r#"
-        tell application "{}"
-            activate
-        end tell
-        delay 0.3
-        tell application "System Events"
-            tell process "{}"
-                keystroke "n" using {{command down, shift down}}
-            end tell
-        end tell
-    "#, config.app_name, config.process_name);
+    let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
+        .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+    ax_helper::open_new_window_ax(pid)
 }
-
 
 /// Close a specific editor window
 pub fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
-    let script = format!(
-        r#"
-        tell application "System Events"
-            tell process "{}"
-                set targetWindow to window {}
-                -- Click the close button (first button in window)
-                click button 1 of targetWindow
-            end tell
-        end tell
-        "#,
-        config.process_name, window_id
-    );
+    let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
+        .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| e.to_string())?;
+    // Convert 1-based window_id to 0-based index
+    let window_index = (window_id - 1) as usize;
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+    ax_helper::close_window_ax(pid, window_index)
 }
-

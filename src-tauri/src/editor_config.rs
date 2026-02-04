@@ -4,8 +4,7 @@ pub struct EditorConfig {
     pub id: &'static str,           // "vscode", "cursor", "zed"
     pub display_name: &'static str, // "Visual Studio Code", "Cursor"
     pub bundle_id: &'static str,    // macOS bundle ID
-    pub process_name: &'static str, // AppleScript process name
-    pub app_name: &'static str,     // App name for activate command
+    pub app_name: &'static str,     // App name for title parsing
 }
 
 /// List of supported editors (add new editors here)
@@ -14,21 +13,18 @@ pub const EDITORS: &[EditorConfig] = &[
         id: "vscode",
         display_name: "Visual Studio Code",
         bundle_id: "com.microsoft.VSCode",
-        process_name: "Code",
         app_name: "Visual Studio Code",
     },
     EditorConfig {
         id: "cursor",
         display_name: "Cursor",
         bundle_id: "com.todesktop.230313mzl4w4u92",
-        process_name: "Cursor",
         app_name: "Cursor",
     },
     EditorConfig {
         id: "zed",
         display_name: "Zed",
         bundle_id: "dev.zed.Zed",
-        process_name: "zed",
         app_name: "Zed",
     },
 ];

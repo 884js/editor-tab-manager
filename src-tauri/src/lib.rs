@@ -1,3 +1,4 @@
+mod ax_helper;
 mod editor;
 mod editor_config;
 mod notification;
