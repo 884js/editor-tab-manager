@@ -7,6 +7,7 @@ import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
+import AccessibilityGuide from "./components/AccessibilityGuide";
 
 export interface EditorWindow {
   id: number;
@@ -89,6 +90,7 @@ function App() {
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [badgeWindowNames, setBadgeWindowNames] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
@@ -97,6 +99,56 @@ function App() {
   const isEditorActiveRef = useRef(false); // Track if editor (VSCode/Cursor) is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
+
+  // Check accessibility permission on startup
+  useEffect(() => {
+    const checkPermission = async () => {
+      try {
+        const hasPermission = await invoke<boolean>("check_accessibility_permission");
+        setHasAccessibilityPermission(hasPermission);
+      } catch (error) {
+        console.error("Failed to check accessibility permission:", error);
+        // Default to true to avoid blocking the app on error
+        setHasAccessibilityPermission(true);
+      }
+    };
+    checkPermission();
+  }, []);
+
+  const handlePermissionGranted = useCallback(() => {
+    setHasAccessibilityPermission(true);
+  }, []);
+
+  // Adjust window size based on accessibility permission state
+  useEffect(() => {
+    if (hasAccessibilityPermission === null) return;
+
+    const adjustWindowSize = async () => {
+      const appWindow = getCurrentWindow();
+      const monitor = await currentMonitor();
+      if (!monitor) return;
+
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      const screenHeight = monitor.size.height / monitor.scaleFactor;
+
+      if (!hasAccessibilityPermission) {
+        // AccessibilityGuide用: 大きいウィンドウ（設定画面と同様）
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, screenHeight));
+        await appWindow.setSize(new LogicalSize(600, 400));
+        await appWindow.setPosition(new LogicalPosition(
+          (screenWidth - 600) / 2,
+          (screenHeight - 400) / 2
+        ));
+      } else {
+        // 権限許可後: タブバーサイズに戻す
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setPosition(new LogicalPosition(0, 0));
+      }
+    };
+
+    adjustWindowSize();
+  }, [hasAccessibilityPermission]);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -440,6 +492,11 @@ function App() {
 
   // Event-driven visibility + smart polling
   useEffect(() => {
+    // 権限が許可されるまでは何もしない（AccessibilityGuideが表示される）
+    if (hasAccessibilityPermission !== true) {
+      return;
+    }
+
     const appWindow = getCurrentWindow();
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let isMounted = true;
@@ -547,7 +604,7 @@ function App() {
       if (intervalId) clearInterval(intervalId);
       cleanupFns.forEach((fn) => fn());
     };
-  }, [pollEditorState, fetchWindows]);
+  }, [pollEditorState, fetchWindows, hasAccessibilityPermission]);
 
   const handleSettingsClose = useCallback(async () => {
     setShowSettings(false);
@@ -561,6 +618,16 @@ function App() {
       await appWindow.setPosition(new LogicalPosition(0, 0));
     }
   }, []);
+
+  // Show loading state while checking permission
+  if (hasAccessibilityPermission === null) {
+    return null;
+  }
+
+  // Show accessibility guide if permission not granted
+  if (!hasAccessibilityPermission) {
+    return <AccessibilityGuide onPermissionGranted={handlePermissionGranted} />;
+  }
 
   return (
     <>

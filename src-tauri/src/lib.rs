@@ -60,6 +60,42 @@ fn open_file_in_default_app(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_accessibility_client::accessibility::application_is_trusted()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn request_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_accessibility_client::accessibility::application_is_trusted_with_prompt()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Cmd+Shift+T: New editor window
     let new_tab_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
@@ -141,7 +177,11 @@ pub fn run() {
             // Claude Code notification
             clear_claude_notification,
             // File operations
-            open_file_in_default_app
+            open_file_in_default_app,
+            // Accessibility permissions
+            check_accessibility_permission,
+            request_accessibility_permission,
+            open_accessibility_settings
         ])
         .setup(|app| {
             // Set app as accessory (no Dock icon, menu bar only)
