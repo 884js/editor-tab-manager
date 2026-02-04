@@ -26,6 +26,9 @@ block2 = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0"
+accessibility = "0.2"
+accessibility-sys = "0.2"
+core-foundation = "0.10"
 
 [profile.release]
 panic = "abort"

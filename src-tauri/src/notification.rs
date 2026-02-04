@@ -29,11 +29,7 @@ fn read_waiting_paths() -> Vec<String> {
                 .map(|line| {
                     // Normalize path: remove trailing slash
                     let trimmed = line.trim();
-                    if trimmed.ends_with('/') {
-                        trimmed[..trimmed.len() - 1].to_string()
-                    } else {
-                        trimmed.to_string()
-                    }
+                    trimmed.strip_suffix('/').unwrap_or(trimmed).to_string()
                 })
                 .filter(|s| !s.is_empty())
                 .collect()
@@ -86,11 +82,7 @@ pub fn clear_notification_file_for_path(path_to_clear: Option<&str>) {
         Some(clear_path) => {
             // Read current paths, remove the specified path, and write back
             let paths = read_waiting_paths();
-            let normalized_clear = if clear_path.ends_with('/') {
-                &clear_path[..clear_path.len() - 1]
-            } else {
-                clear_path
-            };
+            let normalized_clear = clear_path.strip_suffix('/').unwrap_or(clear_path);
 
             let remaining: Vec<_> = paths
                 .into_iter()

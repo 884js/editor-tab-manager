@@ -3,12 +3,20 @@ use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 static OBSERVER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+// Debounce state for "other" events
+// Using Option<(Instant, AppActivationPayload)> to track pending "other" events
+static PENDING_OTHER_EVENT: Mutex<Option<(Instant, AppActivationPayload)>> = Mutex::new(None);
+// Counter to invalidate pending events when editor/tab_manager is activated
+static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
+const DEBOUNCE_DELAY_MS: u64 = 150;
 
 /// Check if the given app is a supported editor (VSCode, Cursor, etc)
 fn is_target_app(app: &NSRunningApplication) -> bool {
@@ -30,10 +38,45 @@ fn get_frontmost_app() -> Option<Retained<NSRunningApplication>> {
 }
 
 /// Payload for app activation events
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, Debug)]
 pub struct AppActivationPayload {
     pub app_type: String, // "editor", "tab_manager", or "other"
     pub bundle_id: Option<String>,
+}
+
+/// Cancel any pending "other" event and increment the counter
+fn cancel_pending_other_event() {
+    *PENDING_OTHER_EVENT.lock().unwrap() = None;
+    EVENT_COUNTER.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Schedule an "other" event to be emitted after the debounce delay
+fn schedule_other_event(payload: AppActivationPayload, app_handle: Arc<AppHandle>) {
+    let event_id = EVENT_COUNTER.load(Ordering::SeqCst);
+    *PENDING_OTHER_EVENT.lock().unwrap() = Some((Instant::now(), payload.clone()));
+
+    let app_handle_for_thread = Arc::clone(&app_handle);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(DEBOUNCE_DELAY_MS));
+
+        // Check if this event is still valid (not cancelled)
+        let current_event_id = EVENT_COUNTER.load(Ordering::SeqCst);
+        if current_event_id != event_id {
+            // Event was cancelled by a newer editor/tab_manager activation
+            return;
+        }
+
+        // Check if the pending event still exists and has the same timestamp
+        let pending = PENDING_OTHER_EVENT.lock().unwrap().take();
+        if let Some((timestamp, pending_payload)) = pending {
+            if timestamp.elapsed() >= Duration::from_millis(DEBOUNCE_DELAY_MS) {
+                // Emit the debounced "other" event
+                if let Some(window) = app_handle_for_thread.get_webview_window("main") {
+                    let _ = window.emit("app-activated", pending_payload);
+                }
+            }
+        }
+    });
 }
 
 /// Start the workspace observer in a background thread
@@ -63,25 +106,33 @@ pub fn start_observer(app_handle: AppHandle) {
 
             let bundle_id_str = app.bundleIdentifier().map(|s| s.to_string());
 
-            let payload = if is_tab_manager(&app, our_pid) {
-                AppActivationPayload {
+            if is_tab_manager(&app, our_pid) {
+                // Tab manager is active → cancel pending "other" and emit immediately
+                cancel_pending_other_event();
+                let payload = AppActivationPayload {
                     app_type: "tab_manager".to_string(),
                     bundle_id: None,
+                };
+                if let Some(window) = app_handle_clone.get_webview_window("main") {
+                    let _ = window.emit("app-activated", payload);
                 }
             } else if is_target_app(&app) {
-                AppActivationPayload {
+                // Editor is active → cancel pending "other" and emit immediately
+                cancel_pending_other_event();
+                let payload = AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
+                };
+                if let Some(window) = app_handle_clone.get_webview_window("main") {
+                    let _ = window.emit("app-activated", payload);
                 }
             } else {
-                AppActivationPayload {
+                // Other app is active → schedule debounced emit
+                let payload = AppActivationPayload {
                     app_type: "other".to_string(),
                     bundle_id: bundle_id_str,
-                }
-            };
-
-            if let Some(window) = app_handle_clone.get_webview_window("main") {
-                let _ = window.emit("app-activated", payload);
+                };
+                schedule_other_event(payload, Arc::clone(&app_handle_clone));
             }
         });
 
