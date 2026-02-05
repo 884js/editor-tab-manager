@@ -111,27 +111,30 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
             continue;
         }
 
-        // メニューバー直下付近のウィンドウのみを対象とする
-        // macOSのメニューバーは約25pxで、ウィンドウは通常y=25〜39程度に配置される
+        // タブバーとの重なり判定
+        // macOSのメニューバーは約25px、タブバー高さはoffset_y
+        // タブバーの下端位置 = メニューバー + タブバー高さ
         const MENU_BAR_HEIGHT: f64 = 25.0;
-        const MARGIN: f64 = 20.0;
-        let max_y_threshold = MENU_BAR_HEIGHT + offset_y + MARGIN;
+        let tab_bar_bottom = MENU_BAR_HEIGHT + offset_y;
 
-        if *y >= max_y_threshold {
+        // ウィンドウ上端がタブバー下端より上にあれば「重なっている」→移動対象
+        // ウィンドウ上端がタブバー下端以下（>=）であれば「重なっていない」→スキップ
+        if *y >= tab_bar_bottom {
             println!(
-                "[DEBUG] Skipping window '{}': y={} >= max_threshold={} (not near menu bar)",
-                title, y, max_y_threshold
+                "[DEBUG] Skipping window '{}': y={} >= tab_bar_bottom={} (not overlapping with tab bar)",
+                title, y, tab_bar_bottom
             );
             continue;
         }
 
         // 既にオフセットが適用済みかチェック（二重適用防止）
         if let Some(original) = editor_positions.get(title) {
-            // 保存された元の位置と現在位置が異なる場合、既に移動済み
-            if (*y - original.y).abs() > 1.0 {
+            let expected_y = original.y + offset_y;
+            // 現在位置が期待位置（元の位置 + オフセット）に近ければ移動済み
+            if (*y - expected_y).abs() < 5.0 {
                 println!(
-                    "[DEBUG] Skipping window '{}': already offset (original.y={}, current y={})",
-                    title, original.y, y
+                    "[DEBUG] Skipping window '{}': already at expected position (original.y={}, expected_y={}, current y={})",
+                    title, original.y, expected_y, y
                 );
                 continue;
             }
