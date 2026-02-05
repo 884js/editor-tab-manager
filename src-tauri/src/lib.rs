@@ -3,6 +3,7 @@ mod editor;
 mod editor_config;
 mod notification;
 mod observer;
+mod window_offset;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -97,6 +98,21 @@ fn open_accessibility_settings() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command(rename_all = "snake_case")]
+fn apply_window_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
+    window_offset::apply_offset(bundle_id, offset_y)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn restore_window_positions(bundle_id: &str) -> Result<(), String> {
+    window_offset::restore_positions(bundle_id)
+}
+
+#[tauri::command]
+fn restore_all_window_positions() -> Result<(), String> {
+    window_offset::restore_all_pending()
+}
+
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Cmd+Shift+T: New editor window
     let new_tab_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
@@ -182,12 +198,23 @@ pub fn run() {
             // Accessibility permissions
             check_accessibility_permission,
             request_accessibility_permission,
-            open_accessibility_settings
+            open_accessibility_settings,
+            // Window offset management
+            apply_window_offset,
+            restore_window_positions,
+            restore_all_window_positions
         ])
         .setup(|app| {
             // Set app as accessory (no Dock icon, menu bar only)
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Restore any pending window positions from previous crash
+            if window_offset::has_pending_restorations() {
+                if let Err(e) = window_offset::restore_all_pending() {
+                    eprintln!("Failed to restore pending window positions: {}", e);
+                }
+            }
 
             // Setup menu bar tray icon
             let settings_item = MenuItem::with_id(app, "settings", "設定...", true, None::<&str>)?;
@@ -207,6 +234,10 @@ pub fn run() {
                             let _ = window.emit("show-settings", ());
                         }
                     } else if event.id.as_ref() == "quit" {
+                        // Restore window positions before quitting
+                        if let Err(e) = window_offset::restore_all_pending() {
+                            eprintln!("Failed to restore window positions on quit: {}", e);
+                        }
                         app.exit(0);
                     }
                 })

@@ -1,0 +1,273 @@
+//! Window offset management module
+//!
+//! Manages automatic window offset when the tab bar is visible to prevent
+//! editor UI elements (like search bars) from being hidden behind the tab bar.
+
+use crate::ax_helper;
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::sync::Mutex;
+
+/// Temporary file path for storing original window positions
+const OFFSET_FILE_PATH: &str = "/tmp/editor-tab-manager-offsets.json";
+
+/// Window frame data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowFrame {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Stored window positions keyed by bundle_id -> window_title -> frame
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct OffsetStore {
+    /// bundle_id -> (window_title -> original_frame)
+    pub positions: HashMap<String, HashMap<String, WindowFrame>>,
+}
+
+/// Global store for original window positions
+static OFFSET_STORE: Lazy<Mutex<OffsetStore>> = Lazy::new(|| {
+    // Try to load from file on startup
+    let store = load_from_file().unwrap_or_default();
+    Mutex::new(store)
+});
+
+/// Load offset store from temporary file
+fn load_from_file() -> Option<OffsetStore> {
+    let content = fs::read_to_string(OFFSET_FILE_PATH).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Save offset store to temporary file
+fn save_to_file(store: &OffsetStore) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(store)
+        .map_err(|e| format!("Failed to serialize offset store: {}", e))?;
+    fs::write(OFFSET_FILE_PATH, content)
+        .map_err(|e| format!("Failed to write offset file: {}", e))?;
+    Ok(())
+}
+
+/// Delete the temporary offset file
+fn delete_offset_file() {
+    let _ = fs::remove_file(OFFSET_FILE_PATH);
+}
+
+/// Apply window offset for all windows of the specified editor
+///
+/// This function:
+/// 1. Gets all windows for the editor by bundle_id
+/// 2. Saves original positions (if not already saved)
+/// 3. Moves windows down by TAB_BAR_HEIGHT if they're at Y < TAB_BAR_HEIGHT
+pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
+    println!(
+        "[DEBUG] apply_offset called: bundle_id={}, offset_y={}",
+        bundle_id, offset_y
+    );
+
+    let pid = ax_helper::get_pid_by_bundle_id(bundle_id)
+        .ok_or_else(|| format!("Editor not running: {}", bundle_id))?;
+
+    println!("[DEBUG] Got PID: {}", pid);
+
+    let windows = ax_helper::get_all_window_frames(pid)?;
+
+    println!(
+        "[DEBUG] Found {} windows for {}",
+        windows.len(),
+        bundle_id
+    );
+
+    if windows.is_empty() {
+        println!("[DEBUG] No windows found, returning early");
+        return Ok(());
+    }
+
+    let mut store = OFFSET_STORE.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let editor_positions = store.positions.entry(bundle_id.to_string()).or_default();
+
+    for (title, x, y, width, height) in windows.iter() {
+        println!(
+            "[DEBUG] Processing window: title='{}', x={}, y={}, width={}, height={}",
+            title, x, y, width, height
+        );
+
+        // Skip if title is empty (can't reliably track)
+        if title.is_empty() {
+            println!("[DEBUG] Skipping window with empty title");
+            continue;
+        }
+
+        // Check if window is minimized or fullscreen - skip if so (using title-based lookup)
+        if ax_helper::is_window_minimized_by_title(pid, title).unwrap_or(false) {
+            println!("[DEBUG] Skipping minimized window: '{}'", title);
+            continue;
+        }
+        if ax_helper::is_window_fullscreen_by_title(pid, title).unwrap_or(false) {
+            println!("[DEBUG] Skipping fullscreen window: '{}'", title);
+            continue;
+        }
+
+        // メニューバー直下付近のウィンドウのみを対象とする
+        // macOSのメニューバーは約25pxで、ウィンドウは通常y=25〜39程度に配置される
+        const MENU_BAR_HEIGHT: f64 = 25.0;
+        const MARGIN: f64 = 20.0;
+        let max_y_threshold = MENU_BAR_HEIGHT + offset_y + MARGIN;
+
+        if *y >= max_y_threshold {
+            println!(
+                "[DEBUG] Skipping window '{}': y={} >= max_threshold={} (not near menu bar)",
+                title, y, max_y_threshold
+            );
+            continue;
+        }
+
+        // 既にオフセットが適用済みかチェック（二重適用防止）
+        if let Some(original) = editor_positions.get(title) {
+            // 保存された元の位置と現在位置が異なる場合、既に移動済み
+            if (*y - original.y).abs() > 1.0 {
+                println!(
+                    "[DEBUG] Skipping window '{}': already offset (original.y={}, current y={})",
+                    title, original.y, y
+                );
+                continue;
+            }
+        }
+
+        // Save original position if not already saved
+        if !editor_positions.contains_key(title) {
+            editor_positions.insert(
+                title.clone(),
+                WindowFrame {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                },
+            );
+        }
+
+        // Apply offset: move down by offset_y and reduce height by offset_y
+        let new_y = y + offset_y;
+        let new_height = height - offset_y;
+
+        println!(
+            "[DEBUG] Will move window '{}': y={} -> new_y={}, height={} -> new_height={}",
+            title, y, new_y, height, new_height
+        );
+
+        // Only apply if the new height is still reasonable
+        if new_height > 100.0 {
+            println!(
+                "[DEBUG] Calling set_window_frame_by_title for '{}' with x={}, y={}, w={}, h={}",
+                title, x, new_y, width, new_height
+            );
+            // Use title-based window frame setting to avoid index mismatch issues
+            match ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height) {
+                Ok(()) => println!("[DEBUG] Successfully set window frame for '{}'", title),
+                Err(e) => println!("[DEBUG] Failed to set window frame for '{}': {}", title, e),
+            }
+        } else {
+            println!(
+                "[DEBUG] Skipping window '{}': new_height={} is too small (< 100)",
+                title, new_height
+            );
+        }
+    }
+
+    // Save to file for crash recovery
+    if let Err(e) = save_to_file(&store) {
+        eprintln!("Failed to save offset file: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Restore original window positions for the specified editor
+pub fn restore_positions(bundle_id: &str) -> Result<(), String> {
+    let mut store = OFFSET_STORE.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let editor_positions = match store.positions.get(bundle_id) {
+        Some(positions) if !positions.is_empty() => positions.clone(),
+        _ => return Ok(()), // Nothing to restore
+    };
+
+    let pid = match ax_helper::get_pid_by_bundle_id(bundle_id) {
+        Some(p) => p,
+        None => {
+            // Editor not running, just clear the stored positions
+            store.positions.remove(bundle_id);
+            if store.positions.is_empty() {
+                delete_offset_file();
+            } else if let Err(e) = save_to_file(&store) {
+                eprintln!("Failed to save offset file: {}", e);
+            }
+            return Ok(());
+        }
+    };
+
+    let current_windows = ax_helper::get_all_window_frames(pid)?;
+
+    // Restore each window to its original position (using title-based lookup)
+    for (title, _, _, _, _) in current_windows.iter() {
+        if let Some(original) = editor_positions.get(title) {
+            // Check if window is minimized or fullscreen - skip if so (using title-based lookup)
+            if ax_helper::is_window_minimized_by_title(pid, title).unwrap_or(false) {
+                continue;
+            }
+            if ax_helper::is_window_fullscreen_by_title(pid, title).unwrap_or(false) {
+                continue;
+            }
+
+            // Use title-based window frame setting to avoid index mismatch issues
+            if let Err(e) = ax_helper::set_window_frame_by_title(
+                pid,
+                title,
+                original.x,
+                original.y,
+                original.width,
+                original.height,
+            ) {
+                eprintln!("Failed to restore window frame for '{}': {}", title, e);
+            }
+        }
+    }
+
+    // Clear stored positions for this editor
+    store.positions.remove(bundle_id);
+
+    // Update or delete the file
+    if store.positions.is_empty() {
+        delete_offset_file();
+    } else if let Err(e) = save_to_file(&store) {
+        eprintln!("Failed to save offset file: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Restore all pending window positions (called on app startup for crash recovery)
+pub fn restore_all_pending() -> Result<(), String> {
+    let store = load_from_file();
+
+    if let Some(store) = store {
+        for bundle_id in store.positions.keys() {
+            if let Err(e) = restore_positions(bundle_id) {
+                eprintln!("Failed to restore positions for {}: {}", bundle_id, e);
+            }
+        }
+    }
+
+    // Clean up the file
+    delete_offset_file();
+
+    Ok(())
+}
+
+/// Check if there are any pending restorations
+pub fn has_pending_restorations() -> bool {
+    std::path::Path::new(OFFSET_FILE_PATH).exists()
+}

@@ -552,6 +552,12 @@ function App() {
           // Fetch windows immediately when editor becomes active
           if (app_type === "editor") {
             await fetchWindows(bundle_id);
+            // Apply window offset to prevent editor UI from being hidden behind tab bar
+            if (bundle_id) {
+              invoke("apply_window_offset", { bundle_id, offset_y: 36 }).catch((error) => {
+                console.error("Failed to apply window offset:", error);
+              });
+            }
             // Clear Claude notification badge for the active window only
             const activeWindow = windowsRef.current[activeIndexRef.current];
             if (activeWindow && activeWindow.path) {
@@ -567,6 +573,12 @@ function App() {
           }
         } else {
           // Other app is active - hide the tab bar
+          // Restore window positions before hiding
+          if (currentBundleIdRef.current) {
+            invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
+              console.error("Failed to restore window positions:", error);
+            });
+          }
           isEditorActiveRef.current = false;
           isTabManagerActiveRef.current = false;
           if (isVisibleRef.current) {
