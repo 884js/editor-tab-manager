@@ -8,7 +8,8 @@
       "extra-files": [
         "package.json",
         "src-tauri/tauri.conf.json"
-      ]
+      ],
+      "last-release-sha": "02d6a41"
     }
   }
 }
