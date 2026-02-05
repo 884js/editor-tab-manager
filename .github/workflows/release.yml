@@ -45,10 +45,35 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Import Apple certificate
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import certificate.p12 -k build.keychain -P $APPLE_CERTIFICATE_PASSWORD -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          rm certificate.p12
+
+      - name: Setup Apple API key
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo $APPLE_API_KEY | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
         with:
           tagName: ${{ github.ref_name }}
           releaseName: '${{ github.ref_name }}'
@@ -60,10 +85,7 @@ jobs:
                - Apple Silicon (M1/M2/M3): `*_aarch64.dmg`
                - Intel Mac: `*_x64.dmg`
             2. DMGを開いてアプリをApplicationsフォルダにドラッグ
-            3. 初回起動時は右クリック→「開く」で起動
-            4. システム設定 > プライバシーとセキュリティ > アクセシビリティ で権限を許可
-
-            > ⚠️ アプリは署名されていないため、初回起動時にセキュリティ警告が表示されます。
+            3. システム設定 > プライバシーとセキュリティ > アクセシビリティ で権限を許可
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
