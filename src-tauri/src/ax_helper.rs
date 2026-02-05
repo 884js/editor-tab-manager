@@ -41,6 +41,14 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(String, bool)>, String> {
     let mut result = Vec::new();
 
     for window in windows.into_iter() {
+        // Filter: only include actual windows (role="AXWindow")
+        // This filters out AXApplication elements that Electron apps
+        // sometimes return after sleep/wake cycles
+        let role = window.role().ok().map(|s| s.to_string());
+        if role.as_deref() != Some("AXWindow") {
+            continue;
+        }
+
         // Get window title
         let title = window
             .title()
@@ -63,12 +71,15 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(String, bool)>, String> {
 pub fn focus_window_ax(pid: i32, window_index: usize) -> Result<(), String> {
     let app = AXUIElement::application(pid);
 
-    // Get windows
+    // Get windows and filter to only include actual windows (role="AXWindow")
     let windows = app
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
 
-    let windows_vec: Vec<_> = windows.into_iter().collect();
+    let windows_vec: Vec<_> = windows
+        .into_iter()
+        .filter(|w| w.role().ok().map(|s| s.to_string()).as_deref() == Some("AXWindow"))
+        .collect();
 
     if window_index >= windows_vec.len() {
         return Err(format!(
@@ -100,12 +111,15 @@ pub fn focus_window_ax(pid: i32, window_index: usize) -> Result<(), String> {
 pub fn close_window_ax(pid: i32, window_index: usize) -> Result<(), String> {
     let app = AXUIElement::application(pid);
 
-    // Get windows
+    // Get windows and filter to only include actual windows (role="AXWindow")
     let windows = app
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
 
-    let windows_vec: Vec<_> = windows.into_iter().collect();
+    let windows_vec: Vec<_> = windows
+        .into_iter()
+        .filter(|w| w.role().ok().map(|s| s.to_string()).as_deref() == Some("AXWindow"))
+        .collect();
 
     if window_index >= windows_vec.len() {
         return Err(format!(

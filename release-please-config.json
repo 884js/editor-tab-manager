@@ -1,0 +1,15 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "rust",
+      "bump-minor-pre-major": true,
+      "changelog-sections": [],
+      "include-component-in-tag": false,
+      "extra-files": [
+        "package.json",
+        "src-tauri/tauri.conf.json"
+      ]
+    }
+  },
+  "changelog-path": false
+}
