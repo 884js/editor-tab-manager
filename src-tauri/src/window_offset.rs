@@ -63,26 +63,12 @@ fn delete_offset_file() {
 /// 2. Saves original positions (if not already saved)
 /// 3. Moves windows down by TAB_BAR_HEIGHT if they're at Y < TAB_BAR_HEIGHT
 pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
-    println!(
-        "[DEBUG] apply_offset called: bundle_id={}, offset_y={}",
-        bundle_id, offset_y
-    );
-
     let pid = ax_helper::get_pid_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Editor not running: {}", bundle_id))?;
 
-    println!("[DEBUG] Got PID: {}", pid);
-
     let windows = ax_helper::get_all_window_frames(pid)?;
 
-    println!(
-        "[DEBUG] Found {} windows for {}",
-        windows.len(),
-        bundle_id
-    );
-
     if windows.is_empty() {
-        println!("[DEBUG] No windows found, returning early");
         return Ok(());
     }
 
@@ -90,24 +76,16 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
     let editor_positions = store.positions.entry(bundle_id.to_string()).or_default();
 
     for (title, x, y, width, height) in windows.iter() {
-        println!(
-            "[DEBUG] Processing window: title='{}', x={}, y={}, width={}, height={}",
-            title, x, y, width, height
-        );
-
         // Skip if title is empty (can't reliably track)
         if title.is_empty() {
-            println!("[DEBUG] Skipping window with empty title");
             continue;
         }
 
         // Check if window is minimized or fullscreen - skip if so (using title-based lookup)
         if ax_helper::is_window_minimized_by_title(pid, title).unwrap_or(false) {
-            println!("[DEBUG] Skipping minimized window: '{}'", title);
             continue;
         }
         if ax_helper::is_window_fullscreen_by_title(pid, title).unwrap_or(false) {
-            println!("[DEBUG] Skipping fullscreen window: '{}'", title);
             continue;
         }
 
@@ -120,10 +98,6 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         // ウィンドウ上端がタブバー下端より上にあれば「重なっている」→移動対象
         // ウィンドウ上端がタブバー下端以下（>=）であれば「重なっていない」→スキップ
         if *y >= tab_bar_bottom {
-            println!(
-                "[DEBUG] Skipping window '{}': y={} >= tab_bar_bottom={} (not overlapping with tab bar)",
-                title, y, tab_bar_bottom
-            );
             continue;
         }
 
@@ -132,10 +106,6 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
             let expected_y = original.y + offset_y;
             // 現在位置が期待位置（元の位置 + オフセット）に近ければ移動済み
             if (*y - expected_y).abs() < 5.0 {
-                println!(
-                    "[DEBUG] Skipping window '{}': already at expected position (original.y={}, expected_y={}, current y={})",
-                    title, original.y, expected_y, y
-                );
                 continue;
             }
         }
@@ -157,27 +127,10 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         let new_y = y + offset_y;
         let new_height = height - offset_y;
 
-        println!(
-            "[DEBUG] Will move window '{}': y={} -> new_y={}, height={} -> new_height={}",
-            title, y, new_y, height, new_height
-        );
-
         // Only apply if the new height is still reasonable
         if new_height > 100.0 {
-            println!(
-                "[DEBUG] Calling set_window_frame_by_title for '{}' with x={}, y={}, w={}, h={}",
-                title, x, new_y, width, new_height
-            );
             // Use title-based window frame setting to avoid index mismatch issues
-            match ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height) {
-                Ok(()) => println!("[DEBUG] Successfully set window frame for '{}'", title),
-                Err(e) => println!("[DEBUG] Failed to set window frame for '{}': {}", title, e),
-            }
-        } else {
-            println!(
-                "[DEBUG] Skipping window '{}': new_height={} is too small (< 100)",
-                title, new_height
-            );
+            let _ = ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height);
         }
     }
 

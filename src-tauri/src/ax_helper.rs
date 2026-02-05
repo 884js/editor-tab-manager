@@ -664,22 +664,11 @@ pub fn set_window_frame_by_title(
     use accessibility_sys::AXUIElementSetAttributeValue;
     use core_foundation::base::CFRelease;
 
-    println!(
-        "[DEBUG ax_helper] set_window_frame_by_title: pid={}, title='{}', x={}, y={}, w={}, h={}",
-        pid, title, x, y, width, height
-    );
-
     let app = AXUIElement::application(pid);
 
     let windows = app
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
-
-    println!(
-        "[DEBUG ax_helper] Found {} windows for pid={}",
-        windows.len(),
-        pid
-    );
 
     // Find the window with matching title
     let window = windows
@@ -696,8 +685,6 @@ pub fn set_window_frame_by_title(
         })
         .ok_or_else(|| format!("Window with title '{}' not found", title))?;
 
-    println!("[DEBUG ax_helper] Found matching window for '{}'", title);
-
     // Set position (AXPosition)
     let position_result = unsafe {
         let attr_name = CFString::from_static_string("AXPosition");
@@ -711,11 +698,6 @@ pub fn set_window_frame_by_title(
 
         // Release the CFTypeRef after use
         CFRelease(point_value);
-
-        println!(
-            "[DEBUG ax_helper] AXUIElementSetAttributeValue(AXPosition) returned: {} (0=success, -25200=failure, -25204=cannotComplete, -25205=attributeUnsupported)",
-            err
-        );
 
         if err != 0 {
             return Err(format!("Failed to set window position: AXError {}", err));
@@ -741,17 +723,11 @@ pub fn set_window_frame_by_title(
         // Release the CFTypeRef after use
         CFRelease(size_value);
 
-        println!(
-            "[DEBUG ax_helper] AXUIElementSetAttributeValue(AXSize) returned: {} (0=success, -25200=failure, -25204=cannotComplete, -25205=attributeUnsupported)",
-            err
-        );
-
         if err != 0 {
             return Err(format!("Failed to set window size: AXError {}", err));
         }
     };
 
-    println!("[DEBUG ax_helper] Successfully set window frame for '{}'", title);
     Ok(())
 }
 
