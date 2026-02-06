@@ -103,6 +103,7 @@ function App() {
   const isTabManagerActiveRef = useRef(false); // Track if tab_manager itself is currently active
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
+  const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -202,58 +203,21 @@ function App() {
     }
   }, []);
 
-  // Optimized: Single polling for both windows and visibility
-  const pollEditorState = useCallback(async (appWindow: ReturnType<typeof getCurrentWindow>) => {
+  // Sync active tab with frontmost editor window (called on window-focus-changed event)
+  const syncActiveTab = useCallback(async () => {
+    // タブクリック直後（200ms以内）は同期をスキップ（競合状態を防ぐ）
+    const timeSinceLastClick = Date.now() - lastTabClickTimeRef.current;
+    if (timeSinceLastClick < 200) {
+      return;
+    }
+
     try {
       const bundleId = currentBundleIdRef.current;
-
-      // Load order from store if not already loaded
-      if (!orderLoadedRef.current) {
-        tabOrderRef.current = await loadTabOrder(bundleId);
-        orderLoadedRef.current = true;
-      }
-
       const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
 
-      // Update isEditorActiveRef based on state (only when tab_manager is not active)
-      // When tab_manager is active, polling should not override the flag set by observer
-      if (!isTabManagerActiveRef.current) {
-        isEditorActiveRef.current = state.is_active;
-      }
-
-      // Update visibility (タブマネージャーアクティブ時はスキップ)
-      if (isTabManagerActiveRef.current) {
-        // Tab manager is active - skip visibility control, observer handles it
-      } else if (state.is_active && !isVisibleRef.current) {
-        await appWindow.show();
-        isVisibleRef.current = true;
-      } else if (!state.is_active && isVisibleRef.current) {
-        await appWindow.hide();
-        isVisibleRef.current = false;
-      }
-
-      // Sort by custom order
-      const sorted = sortWindowsByOrder(state.windows, tabOrderRef.current);
-      // Update order ref but don't save to store - only save on explicit reorder
-      tabOrderRef.current = sorted.map(w => w.name);
-
-      // Update windows only if changed (compare by name only, not path)
-      const currentWindows = windowsRef.current;
-      const hasChanged = sorted.length !== currentWindows.length ||
-        sorted.some((w, i) => currentWindows[i]?.name !== w.name);
-
-      if (hasChanged) {
-        setWindows(sorted);
-        if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
-          setActiveIndex(sorted.length - 1);
-        }
-      } else {
-        // Update ref with new ids without triggering re-render
-        windowsRef.current = sorted;
-      }
-
-      // Always sync activeIndex with frontmost editor window
+      // Sync activeIndex with frontmost editor window
       if (state.active_index !== null && state.windows.length > 0) {
+        const sorted = sortWindowsByOrder(state.windows, tabOrderRef.current);
         const frontmostName = state.windows[state.active_index]?.name;
         const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
@@ -269,9 +233,8 @@ function App() {
           }
         }
       }
-      isInitializedRef.current = true;
     } catch (error) {
-      console.error("Failed to poll editor state:", error);
+      console.error("Failed to sync active tab:", error);
     }
   }, []);
 
@@ -280,6 +243,8 @@ function App() {
     // 同じタブなら何もしない
     if (index === activeIndexRef.current) return;
 
+    // クリック時刻を記録（syncActiveTabのデバウンス用）
+    lastTabClickTimeRef.current = Date.now();
     setActiveIndex(index);
     const window = windowsRef.current[index];
     if (window) {
@@ -289,6 +254,7 @@ function App() {
         return;
       }
       // Fire-and-forget: don't await, let UI respond immediately
+      // Use window.id (CGWindowID) for reliable window identification
       invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
         console.error("Failed to focus window:", error);
       });
@@ -365,6 +331,7 @@ function App() {
   const handleCloseTabRef = useRef(handleCloseTab);
   const handleTabClickRef = useRef(handleTabClick);
   const handleNewTabRef = useRef(handleNewTab);
+  const syncActiveTabRef = useRef(syncActiveTab);
 
   useEffect(() => {
     refreshWindowsRef.current = refreshWindows;
@@ -381,6 +348,10 @@ function App() {
   useEffect(() => {
     handleNewTabRef.current = handleNewTab;
   }, [handleNewTab]);
+
+  useEffect(() => {
+    syncActiveTabRef.current = syncActiveTab;
+  }, [syncActiveTab]);
 
   // Setup event listeners - only once on mount
   useEffect(() => {
@@ -429,6 +400,22 @@ function App() {
         }
       });
       cleanupFns.push(unlistenSwitch);
+
+      // Listen for window-focus-changed event from AXObserver (Rust backend)
+      const unlistenWindowFocus = await listen("window-focus-changed", () => {
+        if (isMounted) {
+          syncActiveTabRef.current();
+        }
+      });
+      cleanupFns.push(unlistenWindowFocus);
+
+      // Listen for windows-changed event (window created/destroyed)
+      const unlistenWindowsChanged = await listen("windows-changed", () => {
+        if (isMounted) {
+          refreshWindowsRef.current();
+        }
+      });
+      cleanupFns.push(unlistenWindowsChanged);
 
       // Listen for Claude Code notification events
       const unlistenClaude = await listen<ClaudeNotificationPayload>("claude-notification", (event) => {
@@ -502,7 +489,7 @@ function App() {
     }
   }, []);
 
-  // Event-driven visibility + smart polling
+  // Event-driven visibility (no polling)
   useEffect(() => {
     // 権限が許可されるまでは何もしない（AccessibilityGuideが表示される）
     if (hasAccessibilityPermission !== true) {
@@ -510,7 +497,6 @@ function App() {
     }
 
     const appWindow = getCurrentWindow();
-    let intervalId: ReturnType<typeof setInterval> | null = null;
     let isMounted = true;
     const cleanupFns: (() => void)[] = [];
 
@@ -525,9 +511,9 @@ function App() {
       }
       await appWindow.show();
       isVisibleRef.current = true;
-
-      // Initial fetch with visibility check
-      await pollEditorState(appWindow);
+      isInitializedRef.current = true;
+      // 初期状態を同期
+      await syncActiveTabRef.current();
     };
     initWindow();
 
@@ -618,20 +604,13 @@ function App() {
     };
     setupShowSettingsListener();
 
-    // Polling: always poll to keep state in sync (NSWorkspace events are supplementary)
-    const startDelay = setTimeout(() => {
-      intervalId = setInterval(async () => {
-        await pollEditorState(appWindow);
-      }, 500); // 500ms polling for faster tab switch response
-    }, 2000);
+    // No polling - all updates are event-driven via AXObserver and NSWorkspace observer
 
     return () => {
       isMounted = false;
-      clearTimeout(startDelay);
-      if (intervalId) clearInterval(intervalId);
       cleanupFns.forEach((fn) => fn());
     };
-  }, [pollEditorState, fetchWindows, hasAccessibilityPermission]);
+  }, [fetchWindows, hasAccessibilityPermission]);
 
   const handleSettingsClose = useCallback(async () => {
     setShowSettings(false);

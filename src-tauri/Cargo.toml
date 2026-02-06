@@ -30,6 +30,7 @@ accessibility = "0.2"
 accessibility-sys = "0.2"
 core-foundation = "0.10"
 core-graphics = "0.24"
+lazy_static = "1.4"
 
 [profile.release]
 panic = "abort"

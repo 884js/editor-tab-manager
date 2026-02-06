@@ -1,4 +1,5 @@
 mod ax_helper;
+mod ax_observer;
 mod editor;
 mod editor_config;
 mod notification;
@@ -29,7 +30,7 @@ fn get_editor_state(bundle_id: Option<&str>) -> EditorState {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+fn focus_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
     editor::focus_editor_window(bundle_id, window_id)
 }
 
@@ -39,7 +40,7 @@ fn open_new_editor(bundle_id: &str) -> Result<(), String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
     editor::close_editor_window(bundle_id, window_id)
 }
 
@@ -246,6 +247,9 @@ pub fn run() {
             if let Err(e) = setup_shortcuts(app.handle()) {
                 eprintln!("Failed to setup shortcuts: {}", e);
             }
+
+            // Initialize AX observer system
+            ax_observer::init(app.handle().clone());
 
             // Start NSWorkspace observer for app activation events
             observer::start_observer(app.handle().clone());
