@@ -1,3 +1,4 @@
+use crate::ax_observer;
 use crate::editor_config::is_supported_editor;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
@@ -119,6 +120,9 @@ pub fn start_observer(app_handle: AppHandle) {
             } else if is_target_app(&app) {
                 // Editor is active → cancel pending "other" and emit immediately
                 cancel_pending_other_event();
+                let bundle_id = bundle_id_str.clone().unwrap_or_default();
+                // Register AX observer for this editor
+                ax_observer::register_for_editor(&bundle_id);
                 let payload = AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,

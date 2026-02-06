@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorWindow {
-    pub id: i32,
+    pub id: u32,  // CGWindowID for reliable window identification
     pub name: String,
     pub path: String,
 }
@@ -68,17 +68,16 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
     let mut active_index: Option<usize> = None;
     let mut windows = Vec::new();
 
-    for (idx, (title, is_frontmost)) in ax_windows.iter().enumerate() {
+    for (window_id, title, is_frontmost) in ax_windows.iter() {
         // Filter out temporary/transient windows
         if title.is_empty() || title == "Untitled" {
             continue;
         }
 
         let name = extract_project_name(title, config);
-        let window_id = (idx + 1) as i32; // 1-based index for compatibility
 
         windows.push(EditorWindow {
-            id: window_id,
+            id: *window_id,  // Use CGWindowID for reliable identification
             name,
             path: title.clone(),
         });
@@ -121,18 +120,16 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
 
     ax_windows
         .iter()
-        .enumerate()
-        .filter_map(|(idx, (title, _))| {
+        .filter_map(|(window_id, title, _)| {
             // Filter out temporary/transient windows
             if title.is_empty() || title == "Untitled" {
                 return None;
             }
 
             let name = extract_project_name(title, config);
-            let window_id = (idx + 1) as i32; // 1-based index
 
             Some(EditorWindow {
-                id: window_id,
+                id: *window_id,  // Use CGWindowID for reliable identification
                 name,
                 path: title.clone(),
             })
@@ -184,18 +181,16 @@ fn extract_project_name(title: &str, config: &EditorConfig) -> String {
     }
 }
 
-/// Focus a specific editor window by index
-pub fn focus_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+/// Focus a specific editor window by CGWindowID
+/// Uses CGWindowID for reliable window identification regardless of title changes
+pub fn focus_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
     let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
         .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    // Convert 1-based window_id to 0-based index
-    let window_index = (window_id - 1) as usize;
-
-    ax_helper::focus_window_ax(pid, window_index)
+    ax_helper::focus_window_by_id(pid, window_id)
 }
 
 /// Open a new editor window
@@ -209,16 +204,14 @@ pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
     ax_helper::open_new_window_ax(pid)
 }
 
-/// Close a specific editor window
-pub fn close_editor_window(bundle_id: &str, window_id: i32) -> Result<(), String> {
+/// Close a specific editor window by title (path)
+/// Uses title-based matching to avoid index mismatch issues
+pub fn close_editor_window(bundle_id: &str, window_path: &str) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
     let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
         .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    // Convert 1-based window_id to 0-based index
-    let window_index = (window_id - 1) as usize;
-
-    ax_helper::close_window_ax(pid, window_index)
+    ax_helper::close_window_by_title(pid, window_path)
 }

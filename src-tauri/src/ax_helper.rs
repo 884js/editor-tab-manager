@@ -4,11 +4,34 @@
 //! instead of slower AppleScript calls.
 
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
+use accessibility_sys::AXUIElementRef;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
+use core_graphics::window::CGWindowID;
 use objc2_app_kit::NSRunningApplication;
 use objc2_foundation::NSString;
+
+// Private API declaration for getting CGWindowID from AXUIElement
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> i32;
+}
+
+/// Get CGWindowID from an AXUIElement
+/// Returns None if the window ID cannot be retrieved
+pub fn get_window_id(window: &AXUIElement) -> Option<u32> {
+    unsafe {
+        let mut window_id: CGWindowID = 0;
+        let result = _AXUIElementGetWindow(window.as_concrete_TypeRef(), &mut window_id);
+        if result == 0 {
+            // kAXErrorSuccess
+            Some(window_id)
+        } else {
+            None
+        }
+    }
+}
 
 /// Get the process ID (PID) for an application by its bundle identifier
 pub fn get_pid_by_bundle_id(bundle_id: &str) -> Option<i32> {
@@ -26,8 +49,8 @@ pub fn get_pid_by_bundle_id(bundle_id: &str) -> Option<i32> {
 }
 
 /// Get all windows for an application by PID
-/// Returns a vector of (window_title, is_frontmost) tuples
-pub fn get_windows_ax(pid: i32) -> Result<Vec<(String, bool)>, String> {
+/// Returns a vector of (window_id, window_title, is_frontmost) tuples
+pub fn get_windows_ax(pid: i32) -> Result<Vec<(u32, String, bool)>, String> {
     let app = AXUIElement::application(pid);
 
     // Get windows attribute
@@ -49,6 +72,12 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(String, bool)>, String> {
             continue;
         }
 
+        // Get CGWindowID - skip windows without valid ID
+        let window_id = match get_window_id(&window) {
+            Some(id) => id,
+            None => continue,
+        };
+
         // Get window title
         let title = window
             .title()
@@ -61,78 +90,38 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(String, bool)>, String> {
             .map(|fw| windows_equal(&window, fw))
             .unwrap_or(false);
 
-        result.push((title, is_frontmost));
+        result.push((window_id, title, is_frontmost));
     }
 
     Ok(result)
 }
 
-/// Focus a specific window by index (0-based)
-pub fn focus_window_ax(pid: i32, window_index: usize) -> Result<(), String> {
+/// Close a specific window by title
+/// This avoids index mismatch issues by finding the window directly by title
+pub fn close_window_by_title(pid: i32, title: &str) -> Result<(), String> {
     let app = AXUIElement::application(pid);
 
-    // Get windows and filter to only include actual windows (role="AXWindow")
     let windows = app
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
 
-    let windows_vec: Vec<_> = windows
+    // Find the window with matching title
+    let window = windows
         .into_iter()
-        .filter(|w| w.role().ok().map(|s| s.to_string()).as_deref() == Some("AXWindow"))
-        .collect();
-
-    if window_index >= windows_vec.len() {
-        return Err(format!(
-            "Window index {} out of bounds (total: {})",
-            window_index,
-            windows_vec.len()
-        ));
-    }
-
-    let window = &windows_vec[window_index];
-
-    // Raise the window (bring to front)
-    window
-        .raise()
-        .map_err(|e| format!("Failed to raise window: {:?}", e))?;
-
-    // Set as main window
-    window
-        .set_main(CFBoolean::true_value())
-        .map_err(|e| format!("Failed to set main window: {:?}", e))?;
-
-    // Activate the application
-    activate_app_by_pid(pid)?;
-
-    Ok(())
-}
-
-/// Close a specific window by index (0-based)
-pub fn close_window_ax(pid: i32, window_index: usize) -> Result<(), String> {
-    let app = AXUIElement::application(pid);
-
-    // Get windows and filter to only include actual windows (role="AXWindow")
-    let windows = app
-        .windows()
-        .map_err(|e| format!("Failed to get windows: {:?}", e))?;
-
-    let windows_vec: Vec<_> = windows
-        .into_iter()
-        .filter(|w| w.role().ok().map(|s| s.to_string()).as_deref() == Some("AXWindow"))
-        .collect();
-
-    if window_index >= windows_vec.len() {
-        return Err(format!(
-            "Window index {} out of bounds (total: {})",
-            window_index,
-            windows_vec.len()
-        ));
-    }
-
-    let window = &windows_vec[window_index];
+        .find(|w| {
+            // Check role is AXWindow
+            let role = w.role().ok().map(|s| s.to_string());
+            if role.as_deref() != Some("AXWindow") {
+                return false;
+            }
+            // Check title matches
+            let w_title = w.title().map(|s| s.to_string()).unwrap_or_default();
+            w_title == title
+        })
+        .ok_or_else(|| format!("Window with title '{}' not found", title))?;
 
     // Get the close button - AXCloseButton returns an AXUIElement
-    let close_button = get_close_button(window)?;
+    let close_button = get_close_button(&window)?;
 
     close_button
         .press()
@@ -727,6 +716,45 @@ pub fn set_window_frame_by_title(
             return Err(format!("Failed to set window size: AXError {}", err));
         }
     };
+
+    Ok(())
+}
+
+/// Focus a specific window by CGWindowID
+/// Uses CGWindowID for reliable window identification regardless of title changes
+pub fn focus_window_by_id(pid: i32, target_window_id: u32) -> Result<(), String> {
+    let app = AXUIElement::application(pid);
+
+    let windows = app
+        .windows()
+        .map_err(|e| format!("Failed to get windows: {:?}", e))?;
+
+    // Find the window with matching CGWindowID
+    let window = windows
+        .into_iter()
+        .find(|w| {
+            // Check role is AXWindow
+            let role = w.role().ok().map(|s| s.to_string());
+            if role.as_deref() != Some("AXWindow") {
+                return false;
+            }
+            // Check window ID matches
+            get_window_id(w) == Some(target_window_id)
+        })
+        .ok_or_else(|| format!("Window with ID {} not found", target_window_id))?;
+
+    // Raise the window (bring to front)
+    window
+        .raise()
+        .map_err(|e| format!("Failed to raise window: {:?}", e))?;
+
+    // Set as main window
+    window
+        .set_main(CFBoolean::true_value())
+        .map_err(|e| format!("Failed to set main window: {:?}", e))?;
+
+    // Activate the application
+    activate_app_by_pid(pid)?;
 
     Ok(())
 }
