@@ -145,8 +145,8 @@ function App() {
         ));
       } else {
         // 権限許可後: タブバーサイズに戻す
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
     };
@@ -519,8 +519,8 @@ function App() {
       const monitor = await currentMonitor();
       if (monitor) {
         const screenWidth = monitor.size.width / monitor.scaleFactor;
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
       await appWindow.show();
@@ -640,8 +640,8 @@ function App() {
     const monitor = await currentMonitor();
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-      await appWindow.setSize(new LogicalSize(screenWidth, 36));
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
       await appWindow.setPosition(new LogicalPosition(0, 0));
     }
   }, []);
