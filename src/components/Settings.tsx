@@ -8,12 +8,20 @@ interface SettingsProps {
 
 const SETUP_CODE = `{
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "echo \\"g $CLAUDE_PROJECT_DIR\\" >> /tmp/claude-code-events"
+        }]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt",
         "hooks": [{
           "type": "command",
-          "command": "echo $PWD >> /tmp/claude-code-waiting"
+          "command": "echo \\"w $CLAUDE_PROJECT_DIR\\" >> /tmp/claude-code-events"
         }]
       }
     ],
@@ -21,7 +29,7 @@ const SETUP_CODE = `{
       {
         "hooks": [{
           "type": "command",
-          "command": "echo $PWD >> /tmp/claude-code-waiting"
+          "command": "echo \\"w $CLAUDE_PROJECT_DIR\\" >> /tmp/claude-code-events"
         }]
       }
     ]

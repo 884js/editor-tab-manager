@@ -106,6 +106,7 @@ function App() {
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
+  const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({}); // claudeStatuses の最新値を保持（stale closure 対策）
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -165,6 +166,22 @@ function App() {
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
+
+  useEffect(() => {
+    claudeStatusesRef.current = claudeStatuses;
+  }, [claudeStatuses]);
+
+  // Waiting 状態の Claude 通知をクリアする共通関数
+  // Generating 中はクリアしない（応答完了で自動的に消える）
+  const clearWaitingNotification = useCallback((windowName: string) => {
+    const statuses = claudeStatusesRef.current;
+    const fullPath = Object.keys(statuses).find(path =>
+      path.split('/').pop() === windowName
+    );
+    if (fullPath && statuses[fullPath] === 'waiting') {
+      invoke("clear_claude_notification", { path: fullPath }).catch(() => {});
+    }
+  }, []);
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -252,16 +269,9 @@ function App() {
         console.error("Failed to focus window:", error);
       });
 
-      // タブクリック時にClaude通知をクリア（Waiting の場合のみ）
-      // Generating 中はクリアしない（応答完了で自動的に消える）
-      const fullPath = Object.keys(claudeStatuses).find(path =>
-        path.split('/').pop() === window.name
-      );
-      if (fullPath && claudeStatuses[fullPath] === 'waiting') {
-        invoke("clear_claude_notification", { path: fullPath }).catch(() => {});
-      }
+      clearWaitingNotification(window.name);
     }
-  }, [claudeStatuses]);
+  }, [clearWaitingNotification]);
 
   const handleNewTab = useCallback(async () => {
     try {
@@ -533,16 +543,9 @@ function App() {
               });
             }
             // Clear Claude notification for the active window (Waiting の場合のみ)
-            // Generating 中はクリアしない（応答完了で自動的に消える）
             const activeWindow = windowsRef.current[activeIndexRef.current];
             if (activeWindow) {
-              // claudeStatuses からマッチするフルパスを探す
-              const fullPath = Object.keys(claudeStatuses).find(path =>
-                path.split('/').pop() === activeWindow.name
-              );
-              if (fullPath && claudeStatuses[fullPath] === 'waiting') {
-                invoke("clear_claude_notification", { path: fullPath }).catch(() => {});
-              }
+              clearWaitingNotification(activeWindow.name);
             }
           }
         } else {
