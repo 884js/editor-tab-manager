@@ -40,8 +40,8 @@ fn open_new_editor(bundle_id: &str) -> Result<(), String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn close_editor_window(bundle_id: &str, window_path: &str) -> Result<(), String> {
-    editor::close_editor_window(bundle_id, window_path)
+fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
+    editor::close_editor_window(bundle_id, window_id)
 }
 
 #[tauri::command(rename_all = "snake_case")]

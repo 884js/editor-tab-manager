@@ -204,14 +204,14 @@ pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
     ax_helper::open_new_window_ax(pid)
 }
 
-/// Close a specific editor window by title (path)
-/// Uses title-based matching to avoid index mismatch issues
-pub fn close_editor_window(bundle_id: &str, window_path: &str) -> Result<(), String> {
+/// Close a specific editor window by CGWindowID
+/// Uses CGWindowID for reliable window identification regardless of title changes
+pub fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
     let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
         .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
-    ax_helper::close_window_by_title(pid, window_path)
+    ax_helper::close_window_by_id(pid, window_id)
 }

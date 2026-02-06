@@ -284,7 +284,7 @@ function App() {
           console.warn("No bundle_id available, cannot close window");
           return;
         }
-        await invoke("close_editor_window", { bundle_id: bundleId, window_path: window.path });
+        await invoke("close_editor_window", { bundle_id: bundleId, window_id: window.id });
         setTimeout(refreshWindows, 500);
       } catch (error) {
         console.error("Failed to close window:", error);
@@ -382,7 +382,7 @@ function App() {
           const currentWindows = windowsRef.current;
           const bundleId = currentBundleIdRef.current;
           if (currentWindows[currentIndex] && bundleId) {
-            invoke("close_editor_window", { bundle_id: bundleId, window_path: currentWindows[currentIndex].path });
+            invoke("close_editor_window", { bundle_id: bundleId, window_id: currentWindows[currentIndex].id });
             setTimeout(() => refreshWindowsRef.current(), 500);
           }
         }

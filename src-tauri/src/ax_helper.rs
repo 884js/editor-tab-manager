@@ -96,16 +96,16 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(u32, String, bool)>, String> {
     Ok(result)
 }
 
-/// Close a specific window by title
-/// This avoids index mismatch issues by finding the window directly by title
-pub fn close_window_by_title(pid: i32, title: &str) -> Result<(), String> {
+/// Close a specific window by CGWindowID
+/// Uses CGWindowID for reliable window identification regardless of title changes
+pub fn close_window_by_id(pid: i32, target_window_id: u32) -> Result<(), String> {
     let app = AXUIElement::application(pid);
 
     let windows = app
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
 
-    // Find the window with matching title
+    // Find the window with matching CGWindowID
     let window = windows
         .into_iter()
         .find(|w| {
@@ -114,11 +114,10 @@ pub fn close_window_by_title(pid: i32, title: &str) -> Result<(), String> {
             if role.as_deref() != Some("AXWindow") {
                 return false;
             }
-            // Check title matches
-            let w_title = w.title().map(|s| s.to_string()).unwrap_or_default();
-            w_title == title
+            // Check window ID matches
+            get_window_id(w) == Some(target_window_id)
         })
-        .ok_or_else(|| format!("Window with title '{}' not found", title))?;
+        .ok_or_else(|| format!("Window with ID {} not found", target_window_id))?;
 
     // Get the close button - AXCloseButton returns an AXUIElement
     let close_button = get_close_button(&window)?;
