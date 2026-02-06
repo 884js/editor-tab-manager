@@ -9,6 +9,9 @@ import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
 
+// タブバーの高さ（px）
+const TAB_BAR_HEIGHT = 36;
+
 export interface EditorWindow {
   id: number;
   name: string;
@@ -557,7 +560,7 @@ function App() {
             await fetchWindows(bundle_id);
             // Apply window offset to prevent editor UI from being hidden behind tab bar
             if (bundle_id) {
-              invoke("apply_window_offset", { bundle_id, offset_y: 36 }).catch((error) => {
+              invoke("apply_window_offset", { bundle_id, offset_y: TAB_BAR_HEIGHT }).catch((error) => {
                 console.error("Failed to apply window offset:", error);
               });
             }

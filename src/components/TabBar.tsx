@@ -27,11 +27,6 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     // Could be used for visual feedback in the future
   }, []);
 
-  // ドラッグ領域のマウスダウンハンドラ（タブバーウィンドウの移動は無効化）
-  const handleDragAreaMouseDown = useCallback((_e: React.MouseEvent) => {
-    // タブバーは画面上部に固定するため、ウィンドウのドラッグ移動は無効
-  }, []);
-
   const handleDrop = useCallback((toIndex: number) => {
     if (draggedIndex !== null && draggedIndex !== toIndex) {
       onReorder(draggedIndex, toIndex);
@@ -51,10 +46,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
   return (
     <div style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
-      <div
-        style={styles.dragLayer}
-        onMouseDown={handleDragAreaMouseDown}
-      />
+      <div style={styles.dragLayer} />
 
       {/* タブはその上に配置 */}
       <div style={styles.tabsWrapper}>

@@ -4,11 +4,10 @@
 //! editor UI elements (like search bars) from being hidden behind the tab bar.
 
 use crate::ax_helper;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// Temporary file path for storing original window positions
 const OFFSET_FILE_PATH: &str = "/tmp/editor-tab-manager-offsets.json";
@@ -30,7 +29,7 @@ pub struct OffsetStore {
 }
 
 /// Global store for original window positions
-static OFFSET_STORE: Lazy<Mutex<OffsetStore>> = Lazy::new(|| {
+static OFFSET_STORE: LazyLock<Mutex<OffsetStore>> = LazyLock::new(|| {
     // Try to load from file on startup
     let store = load_from_file().unwrap_or_default();
     Mutex::new(store)
@@ -92,8 +91,8 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         // タブバーとの重なり判定
         // macOSのメニューバーは約25px、タブバー高さはoffset_y
         // タブバーの下端位置 = メニューバー + タブバー高さ
-        const MENU_BAR_HEIGHT: f64 = 25.0;
-        let tab_bar_bottom = MENU_BAR_HEIGHT + offset_y;
+        const MACOS_MENU_BAR_HEIGHT: f64 = 25.0;
+        let tab_bar_bottom = MACOS_MENU_BAR_HEIGHT + offset_y;
 
         // ウィンドウ上端がタブバー下端より上にあれば「重なっている」→移動対象
         // ウィンドウ上端がタブバー下端以下（>=）であれば「重なっていない」→スキップ
@@ -128,7 +127,8 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         let new_height = height - offset_y;
 
         // Only apply if the new height is still reasonable
-        if new_height > 100.0 {
+        const MIN_WINDOW_HEIGHT: f64 = 100.0;
+        if new_height > MIN_WINDOW_HEIGHT {
             // Use title-based window frame setting to avoid index mismatch issues
             let _ = ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height);
         }

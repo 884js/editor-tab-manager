@@ -30,7 +30,6 @@ accessibility = "0.2"
 accessibility-sys = "0.2"
 core-foundation = "0.10"
 core-graphics = "0.24"
-once_cell = "1"
 
 [profile.release]
 panic = "abort"
