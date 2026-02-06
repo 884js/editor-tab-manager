@@ -4,11 +4,12 @@
 //! editor UI elements (like search bars) from being hidden behind the tab bar.
 
 use crate::ax_helper;
-use once_cell::sync::Lazy;
+use objc2::MainThreadMarker;
+use objc2_app_kit::NSScreen;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// Temporary file path for storing original window positions
 const OFFSET_FILE_PATH: &str = "/tmp/editor-tab-manager-offsets.json";
@@ -30,7 +31,7 @@ pub struct OffsetStore {
 }
 
 /// Global store for original window positions
-static OFFSET_STORE: Lazy<Mutex<OffsetStore>> = Lazy::new(|| {
+static OFFSET_STORE: LazyLock<Mutex<OffsetStore>> = LazyLock::new(|| {
     // Try to load from file on startup
     let store = load_from_file().unwrap_or_default();
     Mutex::new(store)
@@ -54,6 +55,25 @@ fn save_to_file(store: &OffsetStore) -> Result<(), String> {
 /// Delete the temporary offset file
 fn delete_offset_file() {
     let _ = fs::remove_file(OFFSET_FILE_PATH);
+}
+
+/// macOSのメニューバー高さを動的に取得
+/// Notch付きMacではvisibleFrameがNotchを避けた領域を返す
+fn get_menu_bar_height() -> f64 {
+    // MainThreadMarkerの取得を試みる
+    // GUIアプリなのでメインスレッドから呼ばれることを想定
+    let Some(mtm) = MainThreadMarker::new() else {
+        return 25.0; // フォールバック（メインスレッドでない場合）
+    };
+    let Some(main_screen) = NSScreen::mainScreen(mtm) else {
+        return 25.0; // フォールバック
+    };
+    let frame = main_screen.frame();
+    let visible_frame = main_screen.visibleFrame();
+    // メニューバー高さ = 画面全体の高さ - 可視領域の高さ - 可視領域のY位置
+    // (Dockが下にある場合、visible_frame.origin.yがDock分だけ上にずれる)
+    let menu_bar_height = frame.size.height - visible_frame.size.height - visible_frame.origin.y;
+    menu_bar_height.max(0.0)
 }
 
 /// Apply window offset for all windows of the specified editor
@@ -90,10 +110,10 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         }
 
         // タブバーとの重なり判定
-        // macOSのメニューバーは約25px、タブバー高さはoffset_y
+        // メニューバー高さを動的に取得（Notch付きMac対応）
         // タブバーの下端位置 = メニューバー + タブバー高さ
-        const MENU_BAR_HEIGHT: f64 = 25.0;
-        let tab_bar_bottom = MENU_BAR_HEIGHT + offset_y;
+        let menu_bar_height = get_menu_bar_height();
+        let tab_bar_bottom = menu_bar_height + offset_y;
 
         // ウィンドウ上端がタブバー下端より上にあれば「重なっている」→移動対象
         // ウィンドウ上端がタブバー下端以下（>=）であれば「重なっていない」→スキップ
@@ -128,7 +148,8 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         let new_height = height - offset_y;
 
         // Only apply if the new height is still reasonable
-        if new_height > 100.0 {
+        const MIN_WINDOW_HEIGHT: f64 = 100.0;
+        if new_height > MIN_WINDOW_HEIGHT {
             // Use title-based window frame setting to avoid index mismatch issues
             let _ = ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height);
         }

@@ -9,6 +9,9 @@ import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
 
+// タブバーの高さ（px）
+const TAB_BAR_HEIGHT = 36;
+
 export interface EditorWindow {
   id: number;
   name: string;
@@ -143,8 +146,8 @@ function App() {
         ));
       } else {
         // 権限許可後: タブバーサイズに戻す
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
     };
@@ -494,8 +497,8 @@ function App() {
       const monitor = await currentMonitor();
       if (monitor) {
         const screenWidth = monitor.size.width / monitor.scaleFactor;
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
       await appWindow.show();
@@ -535,7 +538,7 @@ function App() {
             await fetchWindows(bundle_id);
             // Apply window offset to prevent editor UI from being hidden behind tab bar
             if (bundle_id) {
-              invoke("apply_window_offset", { bundle_id, offset_y: 36 }).catch((error) => {
+              invoke("apply_window_offset", { bundle_id, offset_y: TAB_BAR_HEIGHT }).catch((error) => {
                 console.error("Failed to apply window offset:", error);
               });
             }
@@ -608,8 +611,8 @@ function App() {
     const monitor = await currentMonitor();
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-      await appWindow.setSize(new LogicalSize(screenWidth, 36));
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
       await appWindow.setPosition(new LogicalPosition(0, 0));
     }
   }, []);
