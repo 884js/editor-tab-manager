@@ -689,6 +689,7 @@ dependencies = [
  "accessibility-sys",
  "block2",
  "core-foundation",
+ "core-graphics",
  "macos-accessibility-client",
  "objc2",
  "objc2-app-kit",

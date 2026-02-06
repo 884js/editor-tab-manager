@@ -9,6 +9,9 @@ import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
 
+// タブバーの高さ（px）
+const TAB_BAR_HEIGHT = 36;
+
 export interface EditorWindow {
   id: number;
   name: string;
@@ -142,8 +145,8 @@ function App() {
         ));
       } else {
         // 権限許可後: タブバーサイズに戻す
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
     };
@@ -274,6 +277,9 @@ function App() {
 
 
   const handleTabClick = useCallback((index: number) => {
+    // 同じタブなら何もしない
+    if (index === activeIndexRef.current) return;
+
     setActiveIndex(index);
     const window = windowsRef.current[index];
     if (window) {
@@ -513,8 +519,8 @@ function App() {
       const monitor = await currentMonitor();
       if (monitor) {
         const screenWidth = monitor.size.width / monitor.scaleFactor;
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-        await appWindow.setSize(new LogicalSize(screenWidth, 36));
+        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
       }
       await appWindow.show();
@@ -552,6 +558,12 @@ function App() {
           // Fetch windows immediately when editor becomes active
           if (app_type === "editor") {
             await fetchWindows(bundle_id);
+            // Apply window offset to prevent editor UI from being hidden behind tab bar
+            if (bundle_id) {
+              invoke("apply_window_offset", { bundle_id, offset_y: TAB_BAR_HEIGHT }).catch((error) => {
+                console.error("Failed to apply window offset:", error);
+              });
+            }
             // Clear Claude notification badge for the active window only
             const activeWindow = windowsRef.current[activeIndexRef.current];
             if (activeWindow && activeWindow.path) {
@@ -567,6 +579,12 @@ function App() {
           }
         } else {
           // Other app is active - hide the tab bar
+          // Restore window positions before hiding
+          if (currentBundleIdRef.current) {
+            invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
+              console.error("Failed to restore window positions:", error);
+            });
+          }
           isEditorActiveRef.current = false;
           isTabManagerActiveRef.current = false;
           if (isVisibleRef.current) {
@@ -622,8 +640,8 @@ function App() {
     const monitor = await currentMonitor();
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, 36));
-      await appWindow.setSize(new LogicalSize(screenWidth, 36));
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
       await appWindow.setPosition(new LogicalPosition(0, 0));
     }
   }, []);

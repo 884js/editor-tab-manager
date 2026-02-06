@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import Tab from "./Tab";
 import type { EditorWindow } from "../App";
 
@@ -28,15 +27,6 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     // Could be used for visual feedback in the future
   }, []);
 
-  // ドラッグ領域のマウスダウンハンドラ
-  const handleDragAreaMouseDown = useCallback(async (e: React.MouseEvent) => {
-    // 左クリック & シングルクリックのみドラッグ開始
-    if (e.buttons === 1 && e.detail === 1) {
-      await getCurrentWindow().startDragging();
-    }
-    // ダブルクリック時は何もしない（最大化しない）
-  }, []);
-
   const handleDrop = useCallback((toIndex: number) => {
     if (draggedIndex !== null && draggedIndex !== toIndex) {
       onReorder(draggedIndex, toIndex);
@@ -56,10 +46,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
   return (
     <div style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
-      <div
-        style={styles.dragLayer}
-        onMouseDown={handleDragAreaMouseDown}
-      />
+      <div style={styles.dragLayer} />
 
       {/* タブはその上に配置 */}
       <div style={styles.tabsWrapper}>
