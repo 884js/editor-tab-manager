@@ -39,8 +39,11 @@ extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
 }
 
-// kAXFocusedWindowChangedNotification constant
+// AX Notification constants
 const K_AX_FOCUSED_WINDOW_CHANGED: &str = "AXFocusedWindowChanged";
+const K_AX_WINDOW_CREATED: &str = "AXWindowCreated";
+const K_AX_UI_ELEMENT_DESTROYED: &str = "AXUIElementDestroyed";
+const K_AX_TITLE_CHANGED: &str = "AXTitleChanged";
 
 // Error codes
 const K_AX_ERROR_SUCCESS: i32 = 0;
@@ -72,13 +75,22 @@ struct EditorObserver {
 impl Drop for EditorObserver {
     fn drop(&mut self) {
         unsafe {
-            // Remove notification before releasing
-            let notification = CFString::new(K_AX_FOCUSED_WINDOW_CHANGED);
-            AXObserverRemoveNotification(
-                self.observer.get(),
-                self.app_element.get(),
-                notification.as_concrete_TypeRef(),
-            );
+            // Remove all notifications before releasing
+            let notifications = [
+                K_AX_FOCUSED_WINDOW_CHANGED,
+                K_AX_WINDOW_CREATED,
+                K_AX_UI_ELEMENT_DESTROYED,
+                K_AX_TITLE_CHANGED,
+            ];
+
+            for notification_name in &notifications {
+                let notification = CFString::new(notification_name);
+                AXObserverRemoveNotification(
+                    self.observer.get(),
+                    self.app_element.get(),
+                    notification.as_concrete_TypeRef(),
+                );
+            }
             // Release resources
             CFRelease(self.observer.get() as *const c_void);
             CFRelease(self.app_element.get() as *const c_void);
@@ -100,18 +112,33 @@ lazy_static::lazy_static! {
     static ref CALLBACK_REFCON: Arc<Mutex<Option<AppHandle>>> = Arc::new(Mutex::new(None));
 }
 
-/// Callback when focused window changes
+/// Callback when AX notification is received
 extern "C" fn ax_observer_callback(
     _observer: AXObserverRef,
     _element: AXUIElementRef,
-    _notification: CFStringRef,
+    notification: CFStringRef,
     _refcon: *mut c_void,
 ) {
     // Get app handle from global state
     if let Some(app_handle) = CALLBACK_REFCON.lock().unwrap().as_ref() {
         if let Some(window) = app_handle.get_webview_window("main") {
-            // Emit window-focus-changed event
-            let _ = window.emit("window-focus-changed", ());
+            // Convert notification to string to determine event type
+            let notification_str = unsafe {
+                let cf_str = CFString::wrap_under_get_rule(notification);
+                cf_str.to_string()
+            };
+
+            match notification_str.as_str() {
+                K_AX_FOCUSED_WINDOW_CHANGED => {
+                    // Emit window-focus-changed event
+                    let _ = window.emit("window-focus-changed", ());
+                }
+                K_AX_WINDOW_CREATED | K_AX_UI_ELEMENT_DESTROYED | K_AX_TITLE_CHANGED => {
+                    // Emit windows-changed event for window creation/destruction/title change
+                    let _ = window.emit("windows-changed", ());
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -169,22 +196,29 @@ fn register_for_pid(pid: i32) {
             return;
         }
 
-        // Add notification
-        let notification = CFString::new(K_AX_FOCUSED_WINDOW_CHANGED);
-        let result = AXObserverAddNotification(
-            observer,
-            app_element,
-            notification.as_concrete_TypeRef(),
-            ptr::null_mut(),
-        );
-        if result != K_AX_ERROR_SUCCESS {
-            eprintln!(
-                "Failed to add notification for pid {}: error {}",
-                pid, result
+        // Add notifications for all events we want to observe
+        let notifications = [
+            K_AX_FOCUSED_WINDOW_CHANGED,
+            K_AX_WINDOW_CREATED,
+            K_AX_UI_ELEMENT_DESTROYED,
+            K_AX_TITLE_CHANGED,
+        ];
+
+        for notification_name in &notifications {
+            let notification = CFString::new(notification_name);
+            let result = AXObserverAddNotification(
+                observer,
+                app_element,
+                notification.as_concrete_TypeRef(),
+                ptr::null_mut(),
             );
-            CFRelease(observer as *const c_void);
-            CFRelease(app_element as *const c_void);
-            return;
+            if result != K_AX_ERROR_SUCCESS {
+                eprintln!(
+                    "Failed to add notification {} for pid {}: error {}",
+                    notification_name, pid, result
+                );
+                // Continue trying to add other notifications even if one fails
+            }
         }
 
         // Add to run loop

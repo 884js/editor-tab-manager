@@ -409,6 +409,14 @@ function App() {
       });
       cleanupFns.push(unlistenWindowFocus);
 
+      // Listen for windows-changed event (window created/destroyed)
+      const unlistenWindowsChanged = await listen("windows-changed", () => {
+        if (isMounted) {
+          refreshWindowsRef.current();
+        }
+      });
+      cleanupFns.push(unlistenWindowsChanged);
+
       // Listen for Claude Code notification events
       const unlistenClaude = await listen<ClaudeNotificationPayload>("claude-notification", (event) => {
         if (isMounted) {
