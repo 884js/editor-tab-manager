@@ -50,21 +50,6 @@ fn is_editor_active() -> bool {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn clear_claude_notification(path: Option<String>) {
-    claude_status::clear_notification_file_for_path(path.as_deref());
-}
-
-#[tauri::command]
-fn pause_claude_watcher() {
-    claude_status::pause_watcher();
-}
-
-#[tauri::command]
-fn resume_claude_watcher() {
-    claude_status::resume_watcher();
-}
-
-#[tauri::command(rename_all = "snake_case")]
 fn open_file_in_default_app(path: String) -> Result<(), String> {
     std::process::Command::new("open")
         .arg(&path)
@@ -202,10 +187,6 @@ pub fn run() {
             open_new_editor,
             close_editor_window,
             is_editor_active,
-            // Claude Code notification
-            clear_claude_notification,
-            pause_claude_watcher,
-            resume_claude_watcher,
             // File operations
             open_file_in_default_app,
             // Accessibility permissions

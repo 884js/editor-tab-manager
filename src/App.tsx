@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
@@ -107,6 +107,7 @@ function App() {
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
   const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({}); // claudeStatuses の最新値を保持（stale closure 対策）
+  const acknowledgedWaitingRef = useRef<Set<string>>(new Set()); // 確認済み waiting を追跡
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -170,18 +171,6 @@ function App() {
   useEffect(() => {
     claudeStatusesRef.current = claudeStatuses;
   }, [claudeStatuses]);
-
-  // Waiting 状態の Claude 通知をクリアする共通関数
-  // Generating 中はクリアしない（応答完了で自動的に消える）
-  const clearWaitingNotification = useCallback((windowName: string) => {
-    const statuses = claudeStatusesRef.current;
-    const fullPath = Object.keys(statuses).find(path =>
-      path.split('/').pop() === windowName
-    );
-    if (fullPath && statuses[fullPath] === 'waiting') {
-      invoke("clear_claude_notification", { path: fullPath }).catch(() => {});
-    }
-  }, []);
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -268,10 +257,8 @@ function App() {
       invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
         console.error("Failed to focus window:", error);
       });
-
-      clearWaitingNotification(window.name);
     }
-  }, [clearWaitingNotification]);
+  }, []);
 
   const handleNewTab = useCallback(async () => {
     try {
@@ -519,8 +506,6 @@ function App() {
           // Tab Manager active = user is operating the tab bar, so keep it visible
           isEditorActiveRef.current = app_type === "editor";
           isTabManagerActiveRef.current = app_type === "tab_manager";
-          // Resume Claude watcher when tab bar is visible
-          invoke("resume_claude_watcher").catch(() => {});
           if (app_type === "editor" && bundle_id) {
             // Reload order from store if bundle changed
             if (bundle_id !== currentBundleIdRef.current) {
@@ -542,16 +527,9 @@ function App() {
                 console.error("Failed to apply window offset:", error);
               });
             }
-            // Clear Claude notification for the active window (Waiting の場合のみ)
-            const activeWindow = windowsRef.current[activeIndexRef.current];
-            if (activeWindow) {
-              clearWaitingNotification(activeWindow.name);
-            }
           }
         } else {
           // Other app is active - hide the tab bar
-          // Pause Claude watcher to save CPU
-          invoke("pause_claude_watcher").catch(() => {});
           // Restore window positions before hiding
           if (currentBundleIdRef.current) {
             invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
@@ -612,6 +590,36 @@ function App() {
     }
   }, []);
 
+  // acknowledged 済みの waiting をフィルタした effectiveClaudeStatuses を計算
+  const effectiveClaudeStatuses = useMemo(() => {
+    const acknowledged = acknowledgedWaitingRef.current;
+
+    // ステータスが waiting 以外に変わったパスは acknowledged から外す
+    for (const path of acknowledged) {
+      if (claudeStatuses[path] !== "waiting") {
+        acknowledged.delete(path);
+      }
+    }
+
+    // アクティブタブが waiting なら acknowledge
+    const activeWindow = windows[activeIndex];
+    if (activeWindow) {
+      for (const [fullPath, status] of Object.entries(claudeStatuses)) {
+        if (fullPath.split("/").pop() === activeWindow.name && status === "waiting") {
+          acknowledged.add(fullPath);
+        }
+      }
+    }
+
+    // acknowledged 済みの waiting をフィルタ
+    const filtered: Record<string, ClaudeStatus> = {};
+    for (const [path, status] of Object.entries(claudeStatuses)) {
+      if (status === "waiting" && acknowledged.has(path)) continue;
+      filtered[path] = status;
+    }
+    return filtered;
+  }, [claudeStatuses, activeIndex, windows]);
+
   // Show loading state while checking permission
   if (hasAccessibilityPermission === null) {
     return null;
@@ -632,7 +640,7 @@ function App() {
           onNewTab={handleNewTab}
           onCloseTab={handleCloseTab}
           onReorder={handleReorder}
-          claudeStatuses={claudeStatuses}
+          claudeStatuses={effectiveClaudeStatuses}
         />
       )}
       {showSettings && <Settings onClose={handleSettingsClose} />}

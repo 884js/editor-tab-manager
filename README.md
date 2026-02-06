@@ -129,28 +129,44 @@ pnpm tauri build
   "hooks": {
     "UserPromptSubmit": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo $PWD >> /tmp/claude-code-waiting"
-          }
-        ]
+        "hooks": [{
+          "type": "command",
+          "command": "echo \"g $CLAUDE_PROJECT_DIR\" >> /tmp/claude-code-events"
+        }]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [{
+          "type": "command",
+          "command": "echo \"w $CLAUDE_PROJECT_DIR\" >> /tmp/claude-code-events"
+        }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "echo \"w $CLAUDE_PROJECT_DIR\" >> /tmp/claude-code-events"
+        }]
       }
     ]
   }
 }
 ```
 
-この設定により、Claude Code がユーザーの入力を待機するたびに、作業ディレクトリのパスが `/tmp/claude-code-waiting` に書き込まれます。
+この設定により、Claude Code のイベント（プロンプト送信・権限確認・停止）が `/tmp/claude-code-events` に書き込まれます。
 
 #### How it works
 
-1. Claude Code がユーザーの入力待ち状態になると、hooks により `/tmp/claude-code-waiting` ファイルにパスが追記されます
-2. Editor Tab Manager がこのファイルを監視し、変更を検知
-3. 対応するエディタのタブにバッジを表示して通知
+1. ユーザーがプロンプトを送信すると、hooks により `g <path>`（生成中）をイベントファイルに書き込み
+2. Claude Code が権限確認や停止すると、hooks により `w <path>`（待機中）をイベントファイルに書き込み
+3. Editor Tab Manager がファイルを監視し、バッジを表示
+   - 🔵 青バッジ: 入力待ち（waiting）
+   - 🔴 赤バッジ（パルス）: 生成中（generating）
 
-この連携により、別のプロジェクトで作業中でも Claude Code がレスポンスを返したことを見逃しません。
+この連携により、別のプロジェクトで作業中でも Claude Code の状態を一目で把握できます。
 
 **対応エディタ**: VSCode, Cursor（Claude Code の実行環境として）
 
@@ -191,7 +207,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 │       ├── lib.rs         # Tauri setup, commands
 │       ├── editor.rs      # Window detection/manipulation
 │       ├── observer.rs    # App activation observer
-│       └── notification.rs # Claude Code integration
+│       └── claude_status.rs # Claude Code integration
 ```
 
 ## License

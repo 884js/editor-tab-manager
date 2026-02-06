@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -9,7 +9,6 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 static STATUS_WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
-static WATCHER_PAUSED: AtomicBool = AtomicBool::new(false);
 
 const CLAUDE_EVENTS_FILE: &str = "/tmp/claude-code-events";
 
@@ -27,113 +26,108 @@ pub struct ClaudeStatusPayload {
     pub statuses: HashMap<String, ClaudeStatus>,
 }
 
-/// イベントファイルを読み、last-event-wins で各プロジェクトの状態を返す
-fn get_all_statuses() -> HashMap<String, ClaudeStatus> {
-    let path = Path::new(CLAUDE_EVENTS_FILE);
-    if !path.exists() {
-        return HashMap::new();
+/// 1行をパースして状態マップを更新する。状態が変化した場合は true を返す。
+fn apply_line(line: &str, statuses: &mut HashMap<String, ClaudeStatus>) -> bool {
+    let trimmed = line.trim();
+    if trimmed.len() < 3 {
+        return false;
     }
 
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
-    };
+    let prefix = &trimmed[..1];
+    let project = trimmed[2..].trim_end_matches('/');
 
-    let mut statuses = HashMap::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.len() < 3 {
-            continue;
-        }
-
-        let prefix = &trimmed[..1];
-        let project = trimmed[2..].trim_end_matches('/');
-
-        if project.is_empty() {
-            continue;
-        }
-
-        match prefix {
-            "g" => {
-                statuses.insert(project.to_string(), ClaudeStatus::Generating);
-            }
-            "w" => {
-                statuses.insert(project.to_string(), ClaudeStatus::Waiting);
-            }
-            "c" => {
-                statuses.remove(project);
-            }
-            _ => {}
-        }
+    if project.is_empty() {
+        return false;
     }
 
-    statuses
+    match prefix {
+        "g" => {
+            let prev = statuses.insert(project.to_string(), ClaudeStatus::Generating);
+            prev.as_ref() != Some(&ClaudeStatus::Generating)
+        }
+        "w" => {
+            let prev = statuses.insert(project.to_string(), ClaudeStatus::Waiting);
+            prev.as_ref() != Some(&ClaudeStatus::Waiting)
+        }
+        "c" => statuses.remove(project).is_some(),
+        _ => false,
+    }
 }
 
-/// 状態監視ウォッチャーを開始
+/// 状態監視ウォッチャーを開始（差分読み取り方式）
 pub fn start_claude_status_watcher(app_handle: AppHandle) {
     if STATUS_WATCHER_RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
 
     thread::spawn(move || {
-        let mut last_statuses: HashMap<String, ClaudeStatus> = HashMap::new();
+        let mut current_statuses: HashMap<String, ClaudeStatus> = HashMap::new();
+        let mut last_offset: u64 = 0;
 
         while STATUS_WATCHER_RUNNING.load(Ordering::SeqCst) {
-            if WATCHER_PAUSED.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(100));
-                continue;
-            }
+            let path = Path::new(CLAUDE_EVENTS_FILE);
 
-            let statuses = get_all_statuses();
+            if let Ok(metadata) = fs::metadata(path) {
+                let file_size = metadata.len();
 
-            if statuses != last_statuses {
-                last_statuses = statuses.clone();
-
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let payload = ClaudeStatusPayload { statuses };
-                    let _ = window.emit("claude-status", payload);
+                // ファイルが切り詰められた場合はリセット
+                if file_size < last_offset {
+                    last_offset = 0;
+                    current_statuses.clear();
+                    // 空の状態を emit
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let payload = ClaudeStatusPayload {
+                            statuses: current_statuses.clone(),
+                        };
+                        let _ = window.emit("claude-status", payload);
+                    }
                 }
+
+                // 新しいデータがある場合のみ処理
+                if file_size > last_offset {
+                    if let Ok(mut file) = File::open(path) {
+                        if file.seek(SeekFrom::Start(last_offset)).is_ok() {
+                            let reader = BufReader::new(file);
+
+                            for line in reader.lines().map_while(Result::ok) {
+                                let changed = apply_line(&line, &mut current_statuses);
+                                // 状態が変わるたびにイベント発火 → generating を見逃さない
+                                if changed {
+                                    if let Some(window) =
+                                        app_handle.get_webview_window("main")
+                                    {
+                                        let payload = ClaudeStatusPayload {
+                                            statuses: current_statuses.clone(),
+                                        };
+                                        let _ = window.emit("claude-status", payload);
+                                    }
+                                }
+                            }
+                        }
+                        last_offset = file_size;
+                    }
+                }
+            } else {
+                // ファイルが消えた場合
+                if !current_statuses.is_empty() {
+                    current_statuses.clear();
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let payload = ClaudeStatusPayload {
+                            statuses: current_statuses.clone(),
+                        };
+                        let _ = window.emit("claude-status", payload);
+                    }
+                }
+                last_offset = 0;
             }
 
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(300));
         }
     });
-}
-
-/// 特定のパスのバッジをクリア（イベントファイルに `c` を追記）
-pub fn clear_notification_file_for_path(path_to_clear: Option<&str>) {
-    match path_to_clear {
-        Some(clear_path) => {
-            let normalized = clear_path.strip_suffix('/').unwrap_or(clear_path);
-            let entry = format!("c {}\n", normalized);
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(CLAUDE_EVENTS_FILE)
-            {
-                let _ = file.write_all(entry.as_bytes());
-            }
-        }
-        None => {
-            let _ = fs::remove_file(CLAUDE_EVENTS_FILE);
-        }
-    }
 }
 
 /// 状態監視ウォッチャーを停止
 #[allow(dead_code)]
 pub fn stop_claude_status_watcher() {
     STATUS_WATCHER_RUNNING.store(false, Ordering::SeqCst);
-}
-
-/// ウォッチャーを一時停止（タブバー非表示時のCPU最適化）
-pub fn pause_watcher() {
-    WATCHER_PAUSED.store(true, Ordering::SeqCst);
-}
-
-/// ウォッチャーを再開
-pub fn resume_watcher() {
-    WATCHER_PAUSED.store(false, Ordering::SeqCst);
 }
