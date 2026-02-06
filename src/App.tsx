@@ -274,6 +274,9 @@ function App() {
 
 
   const handleTabClick = useCallback((index: number) => {
+    // 同じタブなら何もしない
+    if (index === activeIndexRef.current) return;
+
     setActiveIndex(index);
     const window = windowsRef.current[index];
     if (window) {
