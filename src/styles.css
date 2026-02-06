@@ -53,3 +53,17 @@ body {
   user-select: text !important;
   cursor: text;
 }
+
+/* Pulse animation for Claude Code generating status */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.pulse-animation {
+  animation: pulse 1.5s ease-in-out infinite;
+}

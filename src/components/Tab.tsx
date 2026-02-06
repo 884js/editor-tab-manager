@@ -1,4 +1,5 @@
 import { useState, memo } from "react";
+import type { ClaudeStatus } from "../App";
 
 interface TabProps {
   name: string;
@@ -11,10 +12,10 @@ interface TabProps {
   onDragOver: (index: number) => void;
   onDrop: (index: number) => void;
   index: number;
-  hasBadge?: boolean;
+  claudeStatus?: ClaudeStatus;
 }
 
-const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, hasBadge }: TabProps) {
+const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus }: TabProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   const displayName = name || "Untitled";
@@ -55,7 +56,8 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       title={shortcutKey ? `${displayName} (${shortcutKey})` : displayName}
     >
       <span style={styles.tabName}>{displayName}</span>
-      {hasBadge && <div style={styles.badge} />}
+      {claudeStatus === "waiting" && <div style={styles.badgeWaiting} />}
+      {claudeStatus === "generating" && <div style={styles.badgeGenerating} className="pulse-animation" />}
       <button
         style={{
           ...styles.closeButton,
@@ -120,7 +122,14 @@ const styles: Record<string, React.CSSProperties> = {
     transition: "opacity 0.15s, background 0.15s",
     flexShrink: 0,
   },
-  badge: {
+  badgeWaiting: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#007aff",
+    flexShrink: 0,
+  },
+  badgeGenerating: {
     width: "8px",
     height: "8px",
     borderRadius: "50%",
