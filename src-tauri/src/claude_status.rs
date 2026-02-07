@@ -77,7 +77,6 @@ pub fn start_claude_status_watcher(app_handle: AppHandle) {
                 if file_size < last_offset {
                     last_offset = 0;
                     current_statuses.clear();
-                    // 空の状態を emit
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let payload = ClaudeStatusPayload {
                             statuses: current_statuses.clone(),
@@ -94,7 +93,6 @@ pub fn start_claude_status_watcher(app_handle: AppHandle) {
 
                             for line in reader.lines().map_while(Result::ok) {
                                 let changed = apply_line(&line, &mut current_statuses);
-                                // 状態が変わるたびにイベント発火 → generating を見逃さない
                                 if changed {
                                     if let Some(window) =
                                         app_handle.get_webview_window("main")
@@ -102,7 +100,7 @@ pub fn start_claude_status_watcher(app_handle: AppHandle) {
                                         let payload = ClaudeStatusPayload {
                                             statuses: current_statuses.clone(),
                                         };
-                                        let _ = window.emit("claude-status", payload);
+                                        let _ = window.emit("claude-status", &payload);
                                     }
                                 }
                             }
@@ -134,3 +132,7 @@ pub fn start_claude_status_watcher(app_handle: AppHandle) {
 pub fn stop_claude_status_watcher() {
     STATUS_WATCHER_RUNNING.store(false, Ordering::SeqCst);
 }
+
+#[cfg(test)]
+#[path = "claude_status_tests.rs"]
+mod tests;

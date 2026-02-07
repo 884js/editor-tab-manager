@@ -106,7 +106,6 @@ function App() {
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
-  const acknowledgedWaitingRef = useRef<Set<string>>(new Set()); // 確認済み waiting を追跡
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -585,31 +584,32 @@ function App() {
     }
   }, []);
 
-  // acknowledged 済みの waiting をフィルタした effectiveClaudeStatuses を計算
-  const effectiveClaudeStatuses = useMemo(() => {
-    const acknowledged = acknowledgedWaitingRef.current;
-
-    // ステータスが waiting 以外に変わったパスは acknowledged から外す
-    for (const path of acknowledged) {
-      if (claudeStatuses[path] !== "waiting") {
-        acknowledged.delete(path);
-      }
-    }
-
-    // アクティブタブが waiting なら acknowledge
+  // アクティブタブの waiting を確認済みとして state からクリア
+  useEffect(() => {
     const activeWindow = windows[activeIndex];
-    if (activeWindow) {
-      for (const [fullPath, status] of Object.entries(claudeStatuses)) {
-        if (fullPath.split("/").pop() === activeWindow.name && status === "waiting") {
-          acknowledged.add(fullPath);
-        }
-      }
-    }
+    if (!activeWindow) return;
 
-    // acknowledged 済みの waiting をフィルタ
+    const matchingKey = Object.entries(claudeStatuses).find(
+      ([path, status]) => status === "waiting" && path.split("/").pop() === activeWindow.name
+    );
+    if (matchingKey) {
+      setClaudeStatuses(prev => {
+        const next = { ...prev };
+        delete next[matchingKey[0]];
+        return next;
+      });
+    }
+  }, [activeIndex, windows, claudeStatuses]);
+
+  // 現在アクティブなタブの waiting バッジを非表示にする
+  const effectiveClaudeStatuses = useMemo(() => {
+    const activeWindow = windows[activeIndex];
     const filtered: Record<string, ClaudeStatus> = {};
     for (const [path, status] of Object.entries(claudeStatuses)) {
-      if (status === "waiting" && acknowledged.has(path)) continue;
+      // 現在アクティブなタブの waiting はスキップ（見えているので通知不要）
+      if (status === "waiting" && activeWindow && path.split("/").pop() === activeWindow.name) {
+        continue;
+      }
       filtered[path] = status;
     }
     return filtered;
