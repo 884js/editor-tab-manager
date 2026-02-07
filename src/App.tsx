@@ -106,7 +106,6 @@ function App() {
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
-  const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({}); // claudeStatuses の最新値を保持（stale closure 対策）
   const acknowledgedWaitingRef = useRef<Set<string>>(new Set()); // 確認済み waiting を追跡
 
   // Check accessibility permission on startup
@@ -167,10 +166,6 @@ function App() {
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
-
-  useEffect(() => {
-    claudeStatusesRef.current = claudeStatuses;
-  }, [claudeStatuses]);
 
   const refreshWindows = useCallback(async () => {
     try {

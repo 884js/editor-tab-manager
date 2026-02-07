@@ -37,7 +37,7 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 ### Key Data Flows
 1. **App Activation**: observer.rs detects editor activation → emits `app-activated` → frontend refreshes window list
 2. **Window Operations**: Frontend calls Tauri commands → editor.rs executes AppleScript
-3. **Claude Code Badge**: claude_status.rs watches event log files → emits `claude-status-changed` → frontend shows badge
+3. **Claude Code Badge**: claude_status.rs watches event log files → emits `claude-status` → frontend shows badge
 
 ### Editor Support
 New editors are added in `editor_config.rs`. Each editor needs:

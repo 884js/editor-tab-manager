@@ -60,6 +60,9 @@ pub fn start_claude_status_watcher(app_handle: AppHandle) {
         return;
     }
 
+    // ウォッチャー開始前に古いイベントログをクリア
+    let _ = fs::remove_file(CLAUDE_EVENTS_FILE);
+
     thread::spawn(move || {
         let mut current_statuses: HashMap<String, ClaudeStatus> = HashMap::new();
         let mut last_offset: u64 = 0;
