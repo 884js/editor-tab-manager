@@ -59,6 +59,7 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 - **Multi-Editor Support** - Works with VSCode, Cursor, and Zed
 - **Custom Tab Order** - Drag and drop to reorder tabs; order persists across restarts
 - **Claude Code Integration** - Badge notifications for Claude Code task status
+- **Desktop Notifications** - Get notified when Claude Code finishes generating while you're in another project
 
 ## Supported Editors
 
@@ -166,6 +167,8 @@ Add the following to your `~/.claude/settings.json`:
 
 This configuration writes Claude Code events (prompt submission, permission prompts, stops) to `/tmp/claude-code-events`.
 
+> **Tip**: You can also copy this configuration from the Settings panel within the app.
+
 #### How it works
 
 1. When a user submits a prompt, hooks write `g <path>` (generating) to the event file
@@ -174,7 +177,12 @@ This configuration writes Claude Code events (prompt submission, permission prom
    - Blue badge: Waiting for input
    - Red badge (pulsing): Generating
 
+4. When Claude Code finishes generating (status changes to waiting), a desktop notification is sent if the editor is not in the foreground
+5. Clicking the notification focuses the corresponding project window
+
 This integration lets you monitor Claude Code status at a glance, even while working in another project.
+
+> **Note**: Notifications are only sent when the editor is in the background. If the editor is already in the foreground, only the badge is updated.
 
 **Supported editors**: VSCode, Cursor (as Claude Code execution environments)
 
@@ -184,6 +192,7 @@ The following options are available in the settings panel (accessible from the t
 
 - **Editor selection** - Choose which editors to display in the tab bar
 - **Tab order** - Customize the display order of tabs
+- **Desktop notifications** - Enable/disable notifications when Claude Code finishes generating
 
 ## Development
 
@@ -215,7 +224,8 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 │       ├── lib.rs         # Tauri setup, commands
 │       ├── editor.rs      # Window detection/manipulation
 │       ├── observer.rs    # App activation observer
-│       └── claude_status.rs # Claude Code integration
+│       ├── claude_status.rs # Claude Code integration
+│       └── notification.rs  # Desktop notification handling
 ```
 
 ## License
