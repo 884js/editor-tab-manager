@@ -150,6 +150,16 @@ function App() {
       await appWindow.show();
       isVisibleRef.current = true;
 
+      // 通知クリック = 確認済みなので waiting バッジを消す
+      if (claudeStatusesRef.current[projectPath] === "waiting") {
+        dismissedWaitingRef.current.add(projectPath);
+        setClaudeStatuses(prev => {
+          const next = { ...prev };
+          delete next[projectPath];
+          return next;
+        });
+      }
+
       // 2. macOSの通知クリックによるアプリアクティベーション完了を待つ
       //    通知クリックは送信元アプリ（タブマネージャ）をアクティベートするため、
       //    その処理完了後にエディタをアクティベートする必要がある
