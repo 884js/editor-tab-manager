@@ -4,6 +4,8 @@ import { homeDir } from "@tauri-apps/api/path";
 
 interface SettingsProps {
   onClose: () => void;
+  notificationEnabled: boolean;
+  onNotificationToggle: (enabled: boolean) => void;
 }
 
 const SETUP_CODE = `{
@@ -44,7 +46,7 @@ const SETUP_CODE = `{
   }
 }`;
 
-function Settings({ onClose }: SettingsProps) {
+function Settings({ onClose, notificationEnabled, onNotificationToggle }: SettingsProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -102,6 +104,32 @@ function Settings({ onClose }: SettingsProps) {
 
           <p style={styles.note}>
             設定後、Claude Codeを再起動してください。
+          </p>
+        </div>
+
+        <div style={styles.section}>
+          <h3 style={styles.sectionTitle}>デスクトップ通知</h3>
+          <div style={styles.switchRow}>
+            <span style={styles.switchLabel}>
+              Claude Code生成完了時にデスクトップ通知を表示
+            </span>
+            <div
+              style={{
+                ...styles.switchTrack,
+                ...(notificationEnabled ? styles.switchTrackActive : {}),
+              }}
+              onClick={() => onNotificationToggle(!notificationEnabled)}
+            >
+              <div
+                style={{
+                  ...styles.switchThumb,
+                  ...(notificationEnabled ? styles.switchThumbActive : {}),
+                }}
+              />
+            </div>
+          </div>
+          <p style={styles.note}>
+            エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。
           </p>
         </div>
       </div>
@@ -209,6 +237,42 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#4da6ff",
     cursor: "pointer",
     textDecoration: "underline",
+  },
+  switchRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "8px",
+  },
+  switchLabel: {
+    fontSize: "12px",
+    color: "#ffffff",
+  },
+  switchTrack: {
+    width: "40px",
+    height: "22px",
+    borderRadius: "11px",
+    background: "#404040",
+    cursor: "pointer",
+    position: "relative",
+    transition: "background 0.2s ease",
+    flexShrink: 0,
+  },
+  switchTrackActive: {
+    background: "#0066cc",
+  },
+  switchThumb: {
+    width: "18px",
+    height: "18px",
+    borderRadius: "50%",
+    background: "#ffffff",
+    position: "absolute",
+    top: "2px",
+    left: "2px",
+    transition: "transform 0.2s ease",
+  },
+  switchThumbActive: {
+    transform: "translateX(18px)",
   },
 };
 
