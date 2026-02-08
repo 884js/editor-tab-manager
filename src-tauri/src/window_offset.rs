@@ -9,10 +9,17 @@ use objc2_app_kit::NSScreen;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 
-/// Temporary file path for storing original window positions
-const OFFSET_FILE_PATH: &str = "/tmp/editor-tab-manager-offsets.json";
+/// Get the file path for storing original window positions
+/// Uses ~/Library/Application Support/ instead of /tmp for security
+fn get_offset_file_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let dir = PathBuf::from(&home).join("Library/Application Support/com.editor-tab-manager.app");
+    let _ = fs::create_dir_all(&dir);
+    dir.join("offsets.json")
+}
 
 /// Window frame data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,11 +30,11 @@ pub struct WindowFrame {
     pub height: f64,
 }
 
-/// Stored window positions keyed by bundle_id -> window_title -> frame
+/// Stored window positions keyed by bundle_id -> window_id -> frame
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OffsetStore {
-    /// bundle_id -> (window_title -> original_frame)
-    pub positions: HashMap<String, HashMap<String, WindowFrame>>,
+    /// bundle_id -> (window_id -> original_frame)
+    pub positions: HashMap<String, HashMap<u32, WindowFrame>>,
 }
 
 /// Global store for original window positions
@@ -39,7 +46,7 @@ static OFFSET_STORE: LazyLock<Mutex<OffsetStore>> = LazyLock::new(|| {
 
 /// Load offset store from temporary file
 fn load_from_file() -> Option<OffsetStore> {
-    let content = fs::read_to_string(OFFSET_FILE_PATH).ok()?;
+    let content = fs::read_to_string(get_offset_file_path()).ok()?;
     serde_json::from_str(&content).ok()
 }
 
@@ -47,14 +54,14 @@ fn load_from_file() -> Option<OffsetStore> {
 fn save_to_file(store: &OffsetStore) -> Result<(), String> {
     let content = serde_json::to_string_pretty(store)
         .map_err(|e| format!("Failed to serialize offset store: {}", e))?;
-    fs::write(OFFSET_FILE_PATH, content)
+    fs::write(get_offset_file_path(), content)
         .map_err(|e| format!("Failed to write offset file: {}", e))?;
     Ok(())
 }
 
 /// Delete the temporary offset file
 fn delete_offset_file() {
-    let _ = fs::remove_file(OFFSET_FILE_PATH);
+    let _ = fs::remove_file(get_offset_file_path());
 }
 
 /// macOSのメニューバー高さを動的に取得
@@ -95,17 +102,12 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
     let mut store = OFFSET_STORE.lock().map_err(|e| format!("Lock error: {}", e))?;
     let editor_positions = store.positions.entry(bundle_id.to_string()).or_default();
 
-    for (title, x, y, width, height) in windows.iter() {
-        // Skip if title is empty (can't reliably track)
-        if title.is_empty() {
+    for (window_id, x, y, width, height) in windows.iter() {
+        // Check if window is minimized or fullscreen - skip if so
+        if ax_helper::is_window_minimized_by_id(pid, *window_id).unwrap_or(false) {
             continue;
         }
-
-        // Check if window is minimized or fullscreen - skip if so (using title-based lookup)
-        if ax_helper::is_window_minimized_by_title(pid, title).unwrap_or(false) {
-            continue;
-        }
-        if ax_helper::is_window_fullscreen_by_title(pid, title).unwrap_or(false) {
+        if ax_helper::is_window_fullscreen_by_id(pid, *window_id).unwrap_or(false) {
             continue;
         }
 
@@ -122,7 +124,7 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         }
 
         // 既にオフセットが適用済みかチェック（二重適用防止）
-        if let Some(original) = editor_positions.get(title) {
+        if let Some(original) = editor_positions.get(window_id) {
             let expected_y = original.y + offset_y;
             // 現在位置が期待位置（元の位置 + オフセット）に近ければ移動済み
             if (*y - expected_y).abs() < 5.0 {
@@ -131,9 +133,9 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         }
 
         // Save original position if not already saved
-        if !editor_positions.contains_key(title) {
+        if !editor_positions.contains_key(window_id) {
             editor_positions.insert(
-                title.clone(),
+                *window_id,
                 WindowFrame {
                     x: *x,
                     y: *y,
@@ -150,8 +152,7 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         // Only apply if the new height is still reasonable
         const MIN_WINDOW_HEIGHT: f64 = 100.0;
         if new_height > MIN_WINDOW_HEIGHT {
-            // Use title-based window frame setting to avoid index mismatch issues
-            let _ = ax_helper::set_window_frame_by_title(pid, title, *x, new_y, *width, new_height);
+            let _ = ax_helper::set_window_frame_by_id(pid, *window_id, *x, new_y, *width, new_height);
         }
     }
 
@@ -188,27 +189,26 @@ pub fn restore_positions(bundle_id: &str) -> Result<(), String> {
 
     let current_windows = ax_helper::get_all_window_frames(pid)?;
 
-    // Restore each window to its original position (using title-based lookup)
-    for (title, _, _, _, _) in current_windows.iter() {
-        if let Some(original) = editor_positions.get(title) {
-            // Check if window is minimized or fullscreen - skip if so (using title-based lookup)
-            if ax_helper::is_window_minimized_by_title(pid, title).unwrap_or(false) {
+    // Restore each window to its original position
+    for (current_wid, _, _, _, _) in current_windows.iter() {
+        if let Some(original) = editor_positions.get(current_wid) {
+            // Check if window is minimized or fullscreen - skip if so
+            if ax_helper::is_window_minimized_by_id(pid, *current_wid).unwrap_or(false) {
                 continue;
             }
-            if ax_helper::is_window_fullscreen_by_title(pid, title).unwrap_or(false) {
+            if ax_helper::is_window_fullscreen_by_id(pid, *current_wid).unwrap_or(false) {
                 continue;
             }
 
-            // Use title-based window frame setting to avoid index mismatch issues
-            if let Err(e) = ax_helper::set_window_frame_by_title(
+            if let Err(e) = ax_helper::set_window_frame_by_id(
                 pid,
-                title,
+                *current_wid,
                 original.x,
                 original.y,
                 original.width,
                 original.height,
             ) {
-                eprintln!("Failed to restore window frame for '{}': {}", title, e);
+                eprintln!("Failed to restore window frame for window_id={}: {}", current_wid, e);
             }
         }
     }
@@ -246,5 +246,92 @@ pub fn restore_all_pending() -> Result<(), String> {
 
 /// Check if there are any pending restorations
 pub fn has_pending_restorations() -> bool {
-    std::path::Path::new(OFFSET_FILE_PATH).exists()
+    get_offset_file_path().exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_and_deserialize_offset_store() {
+        let mut store = OffsetStore::default();
+        let mut windows = HashMap::new();
+        windows.insert(
+            12345u32,
+            WindowFrame {
+                x: 0.0,
+                y: 25.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
+        );
+        store
+            .positions
+            .insert("com.microsoft.VSCode".to_string(), windows);
+
+        let json = serde_json::to_string_pretty(&store).unwrap();
+        let deserialized: OffsetStore = serde_json::from_str(&json).unwrap();
+
+        let positions = deserialized.positions.get("com.microsoft.VSCode").unwrap();
+        let frame = positions.get(&12345u32).unwrap();
+        assert_eq!(frame.x, 0.0);
+        assert_eq!(frame.y, 25.0);
+        assert_eq!(frame.width, 1920.0);
+        assert_eq!(frame.height, 1080.0);
+    }
+
+    #[test]
+    fn deserialize_old_string_key_format_fails_gracefully() {
+        // 旧フォーマット（Stringキー）のJSONをデシリアライズするとpanicせずエラーになる
+        let json = r#"{
+            "positions": {
+                "com.microsoft.VSCode": {
+                    "main.rs — my-project": {
+                        "x": 0.0,
+                        "y": 25.0,
+                        "width": 1920.0,
+                        "height": 1080.0
+                    }
+                }
+            }
+        }"#;
+
+        // 数値でないStringキーはu32にデシリアライズできないのでエラーになる
+        let result: Result<OffsetStore, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn multiple_editors_and_windows() {
+        let mut store = OffsetStore::default();
+
+        let mut vscode_windows = HashMap::new();
+        vscode_windows.insert(
+            100u32,
+            WindowFrame { x: 0.0, y: 25.0, width: 960.0, height: 1080.0 },
+        );
+        vscode_windows.insert(
+            200u32,
+            WindowFrame { x: 960.0, y: 25.0, width: 960.0, height: 1080.0 },
+        );
+        store.positions.insert("com.microsoft.VSCode".to_string(), vscode_windows);
+
+        let mut cursor_windows = HashMap::new();
+        cursor_windows.insert(
+            300u32,
+            WindowFrame { x: 0.0, y: 25.0, width: 1920.0, height: 1080.0 },
+        );
+        store.positions.insert("com.todesktop.230313mzl4w4u92".to_string(), cursor_windows);
+
+        let json = serde_json::to_string(&store).unwrap();
+        let deserialized: OffsetStore = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.positions.len(), 2);
+        assert_eq!(deserialized.positions.get("com.microsoft.VSCode").unwrap().len(), 2);
+        assert_eq!(
+            deserialized.positions.get("com.todesktop.230313mzl4w4u92").unwrap().get(&300u32).unwrap().width,
+            1920.0
+        );
+    }
 }

@@ -254,9 +254,12 @@ fn windows_equal(a: &AXUIElement, b: &AXUIElement) -> bool {
     }
 }
 
+/// Window frame info: (window_id, x, y, width, height)
+pub type WindowFrameInfo = (u32, f64, f64, f64, f64);
+
 /// Get all window frames for an application by PID
-/// Returns Vec<(title, x, y, width, height)>
-pub fn get_all_window_frames(pid: i32) -> Result<Vec<(String, f64, f64, f64, f64)>, String> {
+/// Returns Vec<(window_id, x, y, width, height)>
+pub fn get_all_window_frames(pid: i32) -> Result<Vec<WindowFrameInfo>, String> {
     use accessibility_sys::AXUIElementCopyAttributeValue;
     use core_foundation::base::CFType;
 
@@ -274,10 +277,11 @@ pub fn get_all_window_frames(pid: i32) -> Result<Vec<(String, f64, f64, f64, f64
             continue;
         }
 
-        let title = window
-            .title()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+        // Get CGWindowID - skip windows without valid ID
+        let window_id = match get_window_id(&window) {
+            Some(id) => id,
+            None => continue,
+        };
 
         // Get position
         let (x, y) = unsafe {
@@ -321,7 +325,7 @@ pub fn get_all_window_frames(pid: i32) -> Result<Vec<(String, f64, f64, f64, f64
             }
         };
 
-        result.push((title, x, y, width, height));
+        result.push((window_id, x, y, width, height));
     }
 
     Ok(result)
@@ -400,11 +404,11 @@ unsafe fn size_to_ax_value(
     }
 }
 
-/// Set window frame (position and size) by PID and window title
-/// This avoids index mismatch issues by finding the window directly by title
-pub fn set_window_frame_by_title(
+/// Set window frame (position and size) by PID and CGWindowID
+/// Uses CGWindowID for reliable window identification regardless of title changes
+pub fn set_window_frame_by_id(
     pid: i32,
-    title: &str,
+    target_window_id: u32,
     x: f64,
     y: f64,
     width: f64,
@@ -419,23 +423,20 @@ pub fn set_window_frame_by_title(
         .windows()
         .map_err(|e| format!("Failed to get windows: {:?}", e))?;
 
-    // Find the window with matching title
+    // Find the window with matching CGWindowID
     let window = windows
         .into_iter()
         .find(|w| {
-            // Check role is AXWindow
             let role = w.role().ok().map(|s| s.to_string());
             if role.as_deref() != Some("AXWindow") {
                 return false;
             }
-            // Check title matches
-            let w_title = w.title().map(|s| s.to_string()).unwrap_or_default();
-            w_title == title
+            get_window_id(w) == Some(target_window_id)
         })
-        .ok_or_else(|| format!("Window with title '{}' not found", title))?;
+        .ok_or_else(|| format!("Window with ID {} not found", target_window_id))?;
 
     // Set position (AXPosition)
-    let position_result = unsafe {
+    unsafe {
         let attr_name = CFString::from_static_string("AXPosition");
         let point_value = point_to_ax_value(x, y)?;
 
@@ -445,18 +446,12 @@ pub fn set_window_frame_by_title(
             point_value,
         );
 
-        // Release the CFTypeRef after use
         CFRelease(point_value);
 
         if err != 0 {
             return Err(format!("Failed to set window position: AXError {}", err));
         }
-        Ok(())
     };
-
-    if let Err(e) = position_result {
-        return Err(e);
-    }
 
     // Set size (AXSize)
     unsafe {
@@ -469,7 +464,6 @@ pub fn set_window_frame_by_title(
             size_value,
         );
 
-        // Release the CFTypeRef after use
         CFRelease(size_value);
 
         if err != 0 {
@@ -519,8 +513,8 @@ pub fn focus_window_by_id(pid: i32, target_window_id: u32) -> Result<(), String>
     Ok(())
 }
 
-/// Check if a window is minimized by title
-pub fn is_window_minimized_by_title(pid: i32, title: &str) -> Result<bool, String> {
+/// Check if a window is minimized by CGWindowID
+pub fn is_window_minimized_by_id(pid: i32, target_window_id: u32) -> Result<bool, String> {
     use accessibility_sys::AXUIElementCopyAttributeValue;
     use core_foundation::base::CFType;
 
@@ -537,10 +531,9 @@ pub fn is_window_minimized_by_title(pid: i32, title: &str) -> Result<bool, Strin
             if role.as_deref() != Some("AXWindow") {
                 return false;
             }
-            let w_title = w.title().map(|s| s.to_string()).unwrap_or_default();
-            w_title == title
+            get_window_id(w) == Some(target_window_id)
         })
-        .ok_or_else(|| format!("Window with title '{}' not found", title))?;
+        .ok_or_else(|| format!("Window with ID {} not found", target_window_id))?;
 
     unsafe {
         let attr_name = CFString::from_static_string("AXMinimized");
@@ -563,8 +556,8 @@ pub fn is_window_minimized_by_title(pid: i32, title: &str) -> Result<bool, Strin
     }
 }
 
-/// Check if a window is fullscreen by title
-pub fn is_window_fullscreen_by_title(pid: i32, title: &str) -> Result<bool, String> {
+/// Check if a window is fullscreen by CGWindowID
+pub fn is_window_fullscreen_by_id(pid: i32, target_window_id: u32) -> Result<bool, String> {
     use accessibility_sys::AXUIElementCopyAttributeValue;
     use core_foundation::base::CFType;
 
@@ -581,10 +574,9 @@ pub fn is_window_fullscreen_by_title(pid: i32, title: &str) -> Result<bool, Stri
             if role.as_deref() != Some("AXWindow") {
                 return false;
             }
-            let w_title = w.title().map(|s| s.to_string()).unwrap_or_default();
-            w_title == title
+            get_window_id(w) == Some(target_window_id)
         })
-        .ok_or_else(|| format!("Window with title '{}' not found", title))?;
+        .ok_or_else(|| format!("Window with ID {} not found", target_window_id))?;
 
     unsafe {
         let attr_name = CFString::from_static_string("AXFullScreen");
