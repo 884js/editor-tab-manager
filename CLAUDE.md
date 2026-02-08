@@ -32,12 +32,12 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 - **editor.rs** - Window detection/manipulation via AppleScript
 - **editor_config.rs** - Editor definitions (id, bundle_id, display_name)
 - **observer.rs** - NSWorkspace observer for app activation events
-- **notification.rs** - Claude Code notification file watcher (`/tmp/claude-code-waiting`)
+- **claude_status.rs** - Claude Code status detection via event log files
 
 ### Key Data Flows
 1. **App Activation**: observer.rs detects editor activation → emits `app-activated` → frontend refreshes window list
 2. **Window Operations**: Frontend calls Tauri commands → editor.rs executes AppleScript
-3. **Claude Code Badge**: notification.rs watches files → emits `claude-notification` → frontend shows badge
+3. **Claude Code Badge**: claude_status.rs watches event log files → emits `claude-status` → frontend shows badge
 
 ### Editor Support
 New editors are added in `editor_config.rs`. Each editor needs:

@@ -1,8 +1,8 @@
 mod ax_helper;
 mod ax_observer;
+mod claude_status;
 mod editor;
 mod editor_config;
-mod notification;
 mod observer;
 mod window_offset;
 
@@ -47,11 +47,6 @@ fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
 #[tauri::command(rename_all = "snake_case")]
 fn is_editor_active() -> bool {
     editor::is_editor_active()
-}
-
-#[tauri::command(rename_all = "snake_case")]
-fn clear_claude_notification(path: Option<String>) {
-    notification::clear_notification_file_for_path(path.as_deref());
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -192,8 +187,6 @@ pub fn run() {
             open_new_editor,
             close_editor_window,
             is_editor_active,
-            // Claude Code notification
-            clear_claude_notification,
             // File operations
             open_file_in_default_app,
             // Accessibility permissions
@@ -254,8 +247,8 @@ pub fn run() {
             // Start NSWorkspace observer for app activation events
             observer::start_observer(app.handle().clone());
 
-            // Start notification file watcher for Claude Code
-            notification::start_notification_watcher(app.handle().clone());
+            // Start Claude Code status watcher
+            claude_status::start_claude_status_watcher(app.handle().clone());
 
             Ok(())
         })

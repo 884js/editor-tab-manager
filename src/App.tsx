@@ -82,16 +82,20 @@ interface AppActivationPayload {
   bundle_id: string | null;
 }
 
-// Payload from claude-notification event
-interface ClaudeNotificationPayload {
-  waiting: boolean;
-  paths: string[];
+// Claude Code の状態
+export type ClaudeStatus = "waiting" | "generating";
+
+// Payload from claude-status event
+interface ClaudeStatusPayload {
+  statuses: Record<string, ClaudeStatus>;
 }
 
 function App() {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [badgeWindowNames, setBadgeWindowNames] = useState<Set<string>>(new Set());
+  const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
+  const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({});
+  const dismissedWaitingRef = useRef<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const windowsRef = useRef<EditorWindow[]>([]);
@@ -222,15 +226,6 @@ function App() {
         const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
-
-          // アクティブウィンドウが変わったらそのバッジをクリア
-          if (frontmostName) {
-            setBadgeWindowNames(prev => {
-              const next = new Set(prev);
-              next.delete(frontmostName);
-              return next;
-            });
-          }
         }
       }
     } catch (error) {
@@ -253,8 +248,19 @@ function App() {
         console.warn("No bundle_id available, cannot focus window");
         return;
       }
-      // Fire-and-forget: don't await, let UI respond immediately
-      // Use window.id (CGWindowID) for reliable window identification
+      // waiting バッジをクリア（タブクリックで「確認済み」とする）
+      const waitingKey = Object.entries(claudeStatusesRef.current).find(
+        ([path, status]) => status === "waiting" && path.split("/").pop() === window.name
+      )?.[0];
+      if (waitingKey) {
+        dismissedWaitingRef.current.add(waitingKey);
+        setClaudeStatuses(prev => {
+          const next = { ...prev };
+          delete next[waitingKey];
+          return next;
+        });
+      }
+
       invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
         console.error("Failed to focus window:", error);
       });
@@ -417,32 +423,52 @@ function App() {
       });
       cleanupFns.push(unlistenWindowsChanged);
 
-      // Listen for Claude Code notification events
-      const unlistenClaude = await listen<ClaudeNotificationPayload>("claude-notification", (event) => {
-        if (isMounted) {
-          if (event.payload.waiting && event.payload.paths.length > 0) {
-            // 現在アクティブなウィンドウの名前を取得
-            // エディタ（VSCode/Cursor等）がアクティブな場合のみ除外対象とする
-            const activeWindow = windowsRef.current[activeIndexRef.current];
-            const activeWindowName = (isEditorActiveRef.current && activeWindow)
-              ? activeWindow.name
-              : null;
+      // Listen for Claude Code status events
+      const unlistenClaude = await listen<ClaudeStatusPayload>("claude-status", (event) => {
+        if (!isMounted) return;
+        const newStatuses = event.payload.statuses;
+        const prev = claudeStatusesRef.current;
 
-            // Match waiting paths with window names
-            const matchedNames = windowsRef.current
-              .filter(w => {
-                return event.payload.paths.some(p => {
-                  // パスの末尾ディレクトリ名とウィンドウ名を比較
-                  const dirName = p.split('/').pop() || '';
-                  return w.name === dirName;
-                });
-              })
-              .map(w => w.name)
-              .filter(name => name !== activeWindowName); // アクティブウィンドウを除外
-            setBadgeWindowNames(new Set(matchedNames));
-          } else {
-            setBadgeWindowNames(new Set());
+        // dismissed パスの更新: waiting 以外に変わったら dismissed から除外
+        for (const path of dismissedWaitingRef.current) {
+          if (newStatuses[path] !== "waiting") {
+            dismissedWaitingRef.current.delete(path);
           }
+        }
+
+        // dismissed な waiting をフィルタ
+        const filtered: Record<string, ClaudeStatus> = {};
+        for (const [path, status] of Object.entries(newStatuses)) {
+          if (status === "waiting" && dismissedWaitingRef.current.has(path)) {
+            continue;
+          }
+          filtered[path] = status;
+        }
+
+        // ref は常に生のバックエンド状態を保持
+        claudeStatusesRef.current = newStatuses;
+
+        // waiting → generating の遷移を検出（リセット演出）
+        const resetPaths = Object.keys(filtered).filter(
+          path => filtered[path] === "generating" && prev[path] === "waiting"
+        );
+
+        if (resetPaths.length > 0) {
+          const interim: Record<string, ClaudeStatus> = {};
+          for (const [path, status] of Object.entries(filtered)) {
+            if (!resetPaths.includes(path)) {
+              interim[path] = status;
+            }
+          }
+          setClaudeStatuses(interim);
+
+          setTimeout(() => {
+            if (isMounted) {
+              setClaudeStatuses(filtered);
+            }
+          }, 150);
+        } else {
+          setClaudeStatuses(filtered);
         }
       });
       cleanupFns.push(unlistenClaude);
@@ -550,18 +576,6 @@ function App() {
                 console.error("Failed to apply window offset:", error);
               });
             }
-            // Clear Claude notification badge for the active window only
-            const activeWindow = windowsRef.current[activeIndexRef.current];
-            if (activeWindow && activeWindow.path) {
-              // Remove active window from badge set
-              setBadgeWindowNames(prev => {
-                const next = new Set(prev);
-                next.delete(activeWindow.name);
-                return next;
-              });
-              // Clear notification for this path
-              invoke("clear_claude_notification", { path: activeWindow.name }).catch(() => {});
-            }
           }
         } else {
           // Other app is active - hide the tab bar
@@ -625,6 +639,7 @@ function App() {
     }
   }, []);
 
+
   // Show loading state while checking permission
   if (hasAccessibilityPermission === null) {
     return null;
@@ -645,7 +660,7 @@ function App() {
           onNewTab={handleNewTab}
           onCloseTab={handleCloseTab}
           onReorder={handleReorder}
-          badgeWindowNames={badgeWindowNames}
+          claudeStatuses={claudeStatuses}
         />
       )}
       {showSettings && <Settings onClose={handleSettingsClose} />}

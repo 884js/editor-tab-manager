@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import Tab from "./Tab";
-import type { EditorWindow } from "../App";
+import type { EditorWindow, ClaudeStatus } from "../App";
 
 interface TabBarProps {
   tabs: EditorWindow[];
@@ -9,10 +9,20 @@ interface TabBarProps {
   onNewTab: () => void;
   onCloseTab: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
-  badgeWindowNames?: Set<string>;
+  claudeStatuses?: Record<string, ClaudeStatus>;
 }
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, badgeWindowNames }: TabBarProps) {
+// フルパスからプロジェクト名を抽出してマッチング
+const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, ClaudeStatus>) => {
+  if (!statuses) return undefined;
+  for (const [fullPath, status] of Object.entries(statuses)) {
+    const projectName = fullPath.split('/').pop();
+    if (projectName === tabName) return status;
+  }
+  return undefined;
+};
+
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses }: TabBarProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
@@ -63,7 +73,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             index={index}
-            hasBadge={badgeWindowNames?.has(tab.name)}
+            claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
           />
         ))}
         <button
