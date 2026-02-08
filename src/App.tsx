@@ -526,8 +526,9 @@ function App() {
           for (const path of completedPaths) {
             const projectName = path.split("/").pop() || path;
             invoke("send_notification", {
-              title: "Claude Code",
-              body: `${projectName} generation complete`,
+              title: projectName,
+              subtitle: "Claude Code",
+              body: "Generation complete ✅",
               project_path: path,
             });
           }

@@ -136,7 +136,7 @@ unsafe extern "C" fn will_present_notification(
 
 /// Tauri command: send a native notification via UNUserNotificationCenter
 #[tauri::command(rename_all = "snake_case")]
-pub fn send_notification(title: String, body: String, project_path: String) {
+pub fn send_notification(title: String, subtitle: String, body: String, project_path: String) {
     unsafe {
         // Create UNMutableNotificationContent
         let content: Retained<AnyObject> = msg_send![class!(UNMutableNotificationContent), new];
@@ -144,6 +144,10 @@ pub fn send_notification(title: String, body: String, project_path: String) {
         // Set title
         let ns_title = NSString::from_str(&title);
         let _: () = msg_send![&*content, setTitle: &*ns_title];
+
+        // Set subtitle
+        let ns_subtitle = NSString::from_str(&subtitle);
+        let _: () = msg_send![&*content, setSubtitle: &*ns_subtitle];
 
         // Set body
         let ns_body = NSString::from_str(&body);
