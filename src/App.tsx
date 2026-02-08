@@ -138,15 +138,29 @@ function App() {
 
     // Listen for notification click → focus corresponding editor window
     let unlistenClick: (() => void) | null = null;
-    listen<{ project_path: string }>("notification-clicked", (event) => {
+    listen<{ project_path: string }>("notification-clicked", async (event) => {
       const projectPath = event.payload.project_path;
       if (!projectPath) return;
       const projectName = projectPath.split("/").pop() || projectPath;
       const bundleId = currentBundleIdRef.current;
       if (!bundleId) return;
+
+      // 1. タブバーを即座に表示
+      const appWindow = getCurrentWindow();
+      await appWindow.show();
+      isVisibleRef.current = true;
+
+      // 2. macOSの通知クリックによるアプリアクティベーション完了を待つ
+      //    通知クリックは送信元アプリ（タブマネージャ）をアクティベートするため、
+      //    その処理完了後にエディタをアクティベートする必要がある
+      await new Promise(r => setTimeout(r, 500));
+
+      // 3. マッチするウィンドウがあればフォーカス、なければ最初のウィンドウをフォーカス
       const win = windowsRef.current.find(w => w.name === projectName);
       if (win) {
-        invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+      } else if (windowsRef.current.length > 0) {
+        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: windowsRef.current[0].id });
       }
     }).then(u => { unlistenClick = u; });
 
