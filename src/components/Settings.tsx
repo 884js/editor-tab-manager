@@ -16,6 +16,14 @@ const SETUP_CODE = `{
         }]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "echo \\"g $CLAUDE_PROJECT_DIR\\" >> /tmp/claude-code-events"
+        }]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt",

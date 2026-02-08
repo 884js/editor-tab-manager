@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
@@ -94,6 +94,8 @@ function App() {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
+  const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({});
+  const dismissedWaitingRef = useRef<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const windowsRef = useRef<EditorWindow[]>([]);
@@ -246,8 +248,19 @@ function App() {
         console.warn("No bundle_id available, cannot focus window");
         return;
       }
-      // Fire-and-forget: don't await, let UI respond immediately
-      // Use window.id (CGWindowID) for reliable window identification
+      // waiting バッジをクリア（タブクリックで「確認済み」とする）
+      const waitingKey = Object.entries(claudeStatusesRef.current).find(
+        ([path, status]) => status === "waiting" && path.split("/").pop() === window.name
+      )?.[0];
+      if (waitingKey) {
+        dismissedWaitingRef.current.add(waitingKey);
+        setClaudeStatuses(prev => {
+          const next = { ...prev };
+          delete next[waitingKey];
+          return next;
+        });
+      }
+
       invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
         console.error("Failed to focus window:", error);
       });
@@ -412,8 +425,50 @@ function App() {
 
       // Listen for Claude Code status events
       const unlistenClaude = await listen<ClaudeStatusPayload>("claude-status", (event) => {
-        if (isMounted) {
-          setClaudeStatuses(event.payload.statuses);
+        if (!isMounted) return;
+        const newStatuses = event.payload.statuses;
+        const prev = claudeStatusesRef.current;
+
+        // dismissed パスの更新: waiting 以外に変わったら dismissed から除外
+        for (const path of dismissedWaitingRef.current) {
+          if (newStatuses[path] !== "waiting") {
+            dismissedWaitingRef.current.delete(path);
+          }
+        }
+
+        // dismissed な waiting をフィルタ
+        const filtered: Record<string, ClaudeStatus> = {};
+        for (const [path, status] of Object.entries(newStatuses)) {
+          if (status === "waiting" && dismissedWaitingRef.current.has(path)) {
+            continue;
+          }
+          filtered[path] = status;
+        }
+
+        // ref は常に生のバックエンド状態を保持
+        claudeStatusesRef.current = newStatuses;
+
+        // waiting → generating の遷移を検出（リセット演出）
+        const resetPaths = Object.keys(filtered).filter(
+          path => filtered[path] === "generating" && prev[path] === "waiting"
+        );
+
+        if (resetPaths.length > 0) {
+          const interim: Record<string, ClaudeStatus> = {};
+          for (const [path, status] of Object.entries(filtered)) {
+            if (!resetPaths.includes(path)) {
+              interim[path] = status;
+            }
+          }
+          setClaudeStatuses(interim);
+
+          setTimeout(() => {
+            if (isMounted) {
+              setClaudeStatuses(filtered);
+            }
+          }, 150);
+        } else {
+          setClaudeStatuses(filtered);
         }
       });
       cleanupFns.push(unlistenClaude);
@@ -584,36 +639,6 @@ function App() {
     }
   }, []);
 
-  // アクティブタブの waiting を確認済みとして state からクリア
-  useEffect(() => {
-    const activeWindow = windows[activeIndex];
-    if (!activeWindow) return;
-
-    const matchingKey = Object.entries(claudeStatuses).find(
-      ([path, status]) => status === "waiting" && path.split("/").pop() === activeWindow.name
-    );
-    if (matchingKey) {
-      setClaudeStatuses(prev => {
-        const next = { ...prev };
-        delete next[matchingKey[0]];
-        return next;
-      });
-    }
-  }, [activeIndex, windows, claudeStatuses]);
-
-  // 現在アクティブなタブの waiting バッジを非表示にする
-  const effectiveClaudeStatuses = useMemo(() => {
-    const activeWindow = windows[activeIndex];
-    const filtered: Record<string, ClaudeStatus> = {};
-    for (const [path, status] of Object.entries(claudeStatuses)) {
-      // 現在アクティブなタブの waiting はスキップ（見えているので通知不要）
-      if (status === "waiting" && activeWindow && path.split("/").pop() === activeWindow.name) {
-        continue;
-      }
-      filtered[path] = status;
-    }
-    return filtered;
-  }, [claudeStatuses, activeIndex, windows]);
 
   // Show loading state while checking permission
   if (hasAccessibilityPermission === null) {
@@ -635,7 +660,7 @@ function App() {
           onNewTab={handleNewTab}
           onCloseTab={handleCloseTab}
           onReorder={handleReorder}
-          claudeStatuses={effectiveClaudeStatuses}
+          claudeStatuses={claudeStatuses}
         />
       )}
       {showSettings && <Settings onClose={handleSettingsClose} />}
