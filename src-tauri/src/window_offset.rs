@@ -64,6 +64,17 @@ fn delete_offset_file() {
     let _ = fs::remove_file(get_offset_file_path());
 }
 
+/// プライマリディスプレイのサイズを取得
+/// NSScreen::screens() の最初の要素が常にプライマリディスプレイ
+/// (NSScreen::mainScreen はフォーカス中ウィンドウのスクリーンを返すため不適切)
+fn get_primary_screen_size() -> Option<(f64, f64)> {
+    let mtm = MainThreadMarker::new()?;
+    let screens = NSScreen::screens(mtm);
+    let primary = screens.firstObject()?;
+    let frame = primary.frame();
+    Some((frame.size.width, frame.size.height))
+}
+
 /// macOSのメニューバー高さを動的に取得
 /// Notch付きMacではvisibleFrameがNotchを避けた領域を返す
 fn get_menu_bar_height() -> f64 {
@@ -102,7 +113,19 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
     let mut store = OFFSET_STORE.lock().map_err(|e| format!("Lock error: {}", e))?;
     let editor_positions = store.positions.entry(bundle_id.to_string()).or_default();
 
+    // プライマリモニターのサイズを取得（セカンダリモニター上のウィンドウをスキップするため）
+    // 取得失敗時はフィルタなしで従来通り動作
+    let primary_screen = get_primary_screen_size();
+
     for (window_id, x, y, width, height) in windows.iter() {
+        // セカンダリモニター上のウィンドウはスキップ
+        // AXPositionはグローバル座標系（プライマリモニター左上が原点、Y下向き正）
+        if let Some((screen_w, screen_h)) = primary_screen {
+            if *x < 0.0 || *x >= screen_w || *y < 0.0 || *y >= screen_h {
+                continue;
+            }
+        }
+
         // Check if window is minimized or fullscreen - skip if so
         if ax_helper::is_window_minimized_by_id(pid, *window_id).unwrap_or(false) {
             continue;
