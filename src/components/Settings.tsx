@@ -8,6 +8,51 @@ interface SettingsProps {
   onNotificationToggle: (enabled: boolean) => void;
 }
 
+function highlightJSON(json: string): React.ReactNode[] {
+  const tokens: React.ReactNode[] = [];
+  // Match: strings, numbers, booleans, null, or structural characters
+  const regex = /("(?:[^"\\]|\\.)*")\s*:|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}[\]:,])/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = regex.exec(json)) !== null) {
+    // Add any unmatched text (whitespace) before this token
+    if (match.index > lastIndex) {
+      tokens.push(json.slice(lastIndex, match.index));
+    }
+
+    if (match[1] !== undefined) {
+      // Key (string followed by colon)
+      tokens.push(
+        <span key={key++} style={{ color: "#9cdcfe" }}>{match[1]}</span>,
+        json.slice(match.index + match[1].length, match.index + match[0].length), // the colon
+      );
+    } else if (match[2] !== undefined) {
+      // String value
+      tokens.push(<span key={key++} style={{ color: "#ce9178" }}>{match[2]}</span>);
+    } else if (match[3] !== undefined) {
+      // Number
+      tokens.push(<span key={key++} style={{ color: "#b5cea8" }}>{match[3]}</span>);
+    } else if (match[4] !== undefined) {
+      // Boolean / null
+      tokens.push(<span key={key++} style={{ color: "#b5cea8" }}>{match[4]}</span>);
+    } else if (match[5] !== undefined) {
+      // Structural character
+      tokens.push(<span key={key++} style={{ color: "#808080" }}>{match[5]}</span>);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add any remaining text
+  if (lastIndex < json.length) {
+    tokens.push(json.slice(lastIndex));
+  }
+
+  return tokens;
+}
+
 const SETUP_CODE = `{
   "hooks": {
     "UserPromptSubmit": [
@@ -48,6 +93,11 @@ const SETUP_CODE = `{
 
 function Settings({ onClose, notificationEnabled, onNotificationToggle }: SettingsProps) {
   const [copied, setCopied] = useState(false);
+  const [codeExpanded, setCodeExpanded] = useState(false);
+  const [closeHover, setCloseHover] = useState(false);
+  const [openFileHover, setOpenFileHover] = useState(false);
+  const [collapseHover, setCollapseHover] = useState(false);
+  const [copyHover, setCopyHover] = useState(false);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -73,64 +123,131 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
     <div style={styles.container}>
       <div style={styles.header}>
         <h2 style={styles.title}>設定</h2>
-        <button style={styles.closeButton} onClick={onClose}>×</button>
+        <button
+          style={{
+            ...styles.closeButton,
+            ...(closeHover ? { color: "#ffffff" } : {}),
+          }}
+          onClick={onClose}
+          onMouseEnter={() => setCloseHover(true)}
+          onMouseLeave={() => setCloseHover(false)}
+        >
+          ×
+        </button>
       </div>
 
       <div style={styles.content}>
-        <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>Claude Code 通知連携</h3>
-
+        {/* Claude Code 連携 */}
+        <div style={styles.card}>
+          <h3 style={styles.sectionTitle}>Claude Code 連携</h3>
           <p style={styles.description}>
-            Claude Codeがユーザー入力待ちになったときに、タブバーに通知バッジを表示します。
+            Claude Codeの状態をタブバーのバッジで表示し、デスクトップ通知を送信します。以下のhooks設定を追加してください。
           </p>
 
-          <p style={styles.descriptionSmall}>
-            この機能を使うには、Claude Codeの設定ファイル（
-            <span style={styles.link} onClick={handleOpenSettingsFile}>
-              ~/.claude/settings.json
-            </span>
-            ）に以下を追加してください。
-          </p>
-
-          <div style={styles.codeContainer}>
-            <pre style={styles.codeBlock} className="settings-code-block">{SETUP_CODE}</pre>
-            <button
-              style={styles.copyButton}
-              onClick={handleCopy}
-            >
-              {copied ? "コピーしました" : "コピー"}
-            </button>
-          </div>
-
-          <p style={styles.note}>
-            設定後、Claude Codeを再起動してください。
-          </p>
-        </div>
-
-        <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>デスクトップ通知</h3>
-          <div style={styles.switchRow}>
-            <span style={styles.switchLabel}>
-              Claude Code生成完了時にデスクトップ通知を表示
-            </span>
-            <div
-              style={{
-                ...styles.switchTrack,
-                ...(notificationEnabled ? styles.switchTrackActive : {}),
-              }}
-              onClick={() => onNotificationToggle(!notificationEnabled)}
-            >
-              <div
+          {/* ステップ1 */}
+          <div style={styles.stepRow}>
+            <div style={styles.stepNumber}>1</div>
+            <div style={styles.stepContent}>
+              <span>設定ファイルを開く</span>
+              <button
                 style={{
-                  ...styles.switchThumb,
-                  ...(notificationEnabled ? styles.switchThumbActive : {}),
+                  ...styles.openFileButton,
+                  ...(openFileHover ? { background: "#333333" } : {}),
                 }}
-              />
+                onClick={handleOpenSettingsFile}
+                onMouseEnter={() => setOpenFileHover(true)}
+                onMouseLeave={() => setOpenFileHover(false)}
+              >
+                ~/.claude/settings.json を開く
+              </button>
             </div>
           </div>
-          <p style={styles.note}>
-            エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。
-          </p>
+
+          {/* ステップ2 */}
+          <div style={styles.stepRow}>
+            <div style={styles.stepNumber}>2</div>
+            <div style={styles.stepContent}>
+              <span>以下のJSONを追加</span>
+              <div style={styles.collapseWrapper}>
+                <div style={styles.collapseHeaderRow}>
+                  <button
+                    style={{
+                      ...styles.collapseButton,
+                      ...(collapseHover ? { background: "#3a3a3a" } : {}),
+                    }}
+                    onClick={() => setCodeExpanded(!codeExpanded)}
+                    onMouseEnter={() => setCollapseHover(true)}
+                    onMouseLeave={() => setCollapseHover(false)}
+                  >
+                    <span style={{
+                      display: "inline-block",
+                      transform: codeExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                      transition: "transform 0.15s ease",
+                      marginRight: "6px",
+                      fontSize: "10px",
+                    }}>
+                      ▶
+                    </span>
+                    設定コードを{codeExpanded ? "隠す" : "表示"}
+                  </button>
+                  <button
+                    style={{
+                      ...styles.copyButton,
+                      ...(copied ? { background: "#2ea043" } : {}),
+                      ...(copyHover && !copied ? { background: "#0077ee" } : {}),
+                    }}
+                    onClick={handleCopy}
+                    onMouseEnter={() => setCopyHover(true)}
+                    onMouseLeave={() => setCopyHover(false)}
+                  >
+                    {copied ? "✓ コピー済み" : "コピー"}
+                  </button>
+                </div>
+                {codeExpanded && (
+                  <pre style={styles.codeBlockExpanded} className="settings-code-block">
+                    <code>{highlightJSON(SETUP_CODE)}</code>
+                  </pre>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ステップ3 */}
+          <div style={styles.stepRow}>
+            <div style={styles.stepNumber}>3</div>
+            <div style={styles.stepContent}>
+              <span>Claude Codeを再起動</span>
+            </div>
+          </div>
+
+          {/* デスクトップ通知設定 */}
+          <div style={{ borderTop: "1px solid #333333", paddingTop: "14px", marginTop: "2px" }}>
+            <div style={styles.switchRow}>
+              <div style={styles.switchLabelGroup}>
+                <span style={styles.switchLabel}>デスクトップ通知</span>
+                <span style={styles.switchDescription}>
+                  Claude Code生成完了時にデスクトップ通知を表示
+                </span>
+              </div>
+              <div
+                style={{
+                  ...styles.switchTrack,
+                  ...(notificationEnabled ? styles.switchTrackActive : {}),
+                }}
+                onClick={() => onNotificationToggle(!notificationEnabled)}
+              >
+                <div
+                  style={{
+                    ...styles.switchThumb,
+                    ...(notificationEnabled ? styles.switchThumbActive : {}),
+                  }}
+                />
+              </div>
+            </div>
+            <p style={styles.note}>
+              エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -160,6 +277,9 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     overflowY: "auto",
     paddingTop: "16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
   },
   title: {
     color: "#ffffff",
@@ -175,78 +295,144 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     padding: "0 4px",
     lineHeight: 1,
+    transition: "color 0.15s ease",
   },
-  section: {
-    marginBottom: "16px",
+  card: {
+    background: "#252526",
+    border: "1px solid #333333",
+    borderRadius: "8px",
+    padding: "16px",
   },
   sectionTitle: {
     color: "#ffffff",
     fontSize: "13px",
     fontWeight: 600,
-    margin: "0 0 8px 0",
+    margin: "0 0 10px 0",
+    paddingBottom: "8px",
+    borderBottom: "1px solid #333333",
   },
   description: {
-    color: "#ffffff",
+    color: "#cccccc",
     fontSize: "12px",
     lineHeight: 1.5,
-    marginBottom: "6px",
+    margin: "0 0 14px 0",
   },
-  descriptionSmall: {
-    color: "#a0a0a0",
+  stepRow: {
+    display: "flex",
+    gap: "10px",
+    marginBottom: "14px",
+  },
+  stepNumber: {
+    width: "20px",
+    height: "20px",
+    borderRadius: "50%",
+    background: "#0066cc",
+    color: "#ffffff",
     fontSize: "11px",
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    marginTop: "1px",
+  },
+  stepContent: {
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    color: "#cccccc",
+    fontSize: "12px",
     lineHeight: 1.5,
-    marginBottom: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
   },
-  codeContainer: {
-    position: "relative",
-    marginBottom: "12px",
-  },
-  codeBlock: {
-    background: "#2d2d2d",
-    padding: "12px",
-    borderRadius: "6px",
+  openFileButton: {
+    background: "transparent",
+    border: "1px solid #555555",
+    borderRadius: "4px",
+    color: "#4da6ff",
     fontSize: "11px",
-    color: "#e0e0e0",
-    overflow: "auto",
-    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-    whiteSpace: "pre",
+    padding: "6px 10px",
+    cursor: "pointer",
+    textAlign: "left" as const,
+    transition: "background 0.15s ease",
+    width: "fit-content",
+  },
+  collapseWrapper: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0",
+  },
+  collapseHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  collapseButton: {
+    background: "#2d2d2d",
     border: "1px solid #404040",
-    userSelect: "text",
-    WebkitUserSelect: "text",
-    cursor: "text",
-    margin: 0,
+    borderRadius: "4px",
+    color: "#cccccc",
+    fontSize: "11px",
+    padding: "6px 10px",
+    cursor: "pointer",
+    transition: "background 0.15s ease",
   },
   copyButton: {
-    position: "absolute",
-    top: "8px",
-    right: "8px",
-    padding: "4px 10px",
+    padding: "6px 12px",
     fontSize: "11px",
     background: "#0066cc",
-    color: "#fff",
+    color: "#ffffff",
     border: "none",
     borderRadius: "4px",
     cursor: "pointer",
+    transition: "background 0.15s ease",
+    whiteSpace: "nowrap",
+  },
+  codeBlockExpanded: {
+    background: "#2d2d2d",
+    padding: "12px",
+    borderRadius: "0 0 6px 6px",
+    fontSize: "11px",
+    color: "#e0e0e0",
+    overflow: "auto",
+    maxHeight: "200px",
+    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+    whiteSpace: "pre",
+    border: "1px solid #404040",
+    borderTop: "none",
+    userSelect: "text",
+    WebkitUserSelect: "text",
+    cursor: "text",
+    margin: "0",
+    marginTop: "4px",
   },
   note: {
     color: "#606060",
     fontSize: "11px",
-    marginBottom: "0",
-  },
-  link: {
-    color: "#4da6ff",
-    cursor: "pointer",
-    textDecoration: "underline",
+    margin: "0",
   },
   switchRow: {
     display: "flex",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: "8px",
+    gap: "12px",
     marginBottom: "8px",
+  },
+  switchLabelGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    flex: 1,
   },
   switchLabel: {
     fontSize: "12px",
     color: "#ffffff",
+  },
+  switchDescription: {
+    fontSize: "11px",
+    color: "#888888",
   },
   switchTrack: {
     width: "40px",

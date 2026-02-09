@@ -11,6 +11,16 @@ lazy_static! {
     static ref APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
 }
 
+/// Returns true if running inside a proper .app bundle (i.e. has a bundle identifier).
+/// In debug builds (cargo run / tauri dev), there is no bundle so UNUserNotificationCenter crashes.
+fn has_bundle_identifier() -> bool {
+    unsafe {
+        let bundle: *mut AnyObject = msg_send![class!(NSBundle), mainBundle];
+        let identifier: *mut AnyObject = msg_send![bundle, bundleIdentifier];
+        !identifier.is_null()
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct NotificationClickedPayload {
     project_path: String,
@@ -19,6 +29,11 @@ struct NotificationClickedPayload {
 /// Register the custom delegate class for UNUserNotificationCenter.
 /// Must be called once at app startup.
 pub fn setup_notification_delegate(app_handle: AppHandle) {
+    if !has_bundle_identifier() {
+        eprintln!("Skipping notification delegate setup: no bundle identifier (debug build)");
+        return;
+    }
+
     *APP_HANDLE.lock().unwrap() = Some(app_handle);
 
     unsafe {
@@ -137,6 +152,11 @@ unsafe extern "C" fn will_present_notification(
 /// Tauri command: send a native notification via UNUserNotificationCenter
 #[tauri::command(rename_all = "snake_case")]
 pub fn send_notification(title: String, subtitle: String, body: String, project_path: String) {
+    if !has_bundle_identifier() {
+        eprintln!("Skipping notification: no bundle identifier (debug build)");
+        return;
+    }
+
     unsafe {
         // Create UNMutableNotificationContent
         let content: Retained<AnyObject> = msg_send![class!(UNMutableNotificationContent), new];
