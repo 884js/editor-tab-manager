@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { currentMonitor } from "@tauri-apps/api/window";
 import { load } from "@tauri-apps/plugin-store";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import type { Store } from "@tauri-apps/plugin-store";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
@@ -108,6 +109,87 @@ function App() {
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
+  const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
+  const notificationEnabledRef = useRef<boolean>(true);
+
+  // Initialize notification permission and load setting from store
+  useEffect(() => {
+    const initNotification = async () => {
+      // Load setting from store
+      try {
+        const store = await getStore();
+        const saved = await store.get<boolean>("notification:enabled");
+        if (saved !== null && saved !== undefined) {
+          setNotificationEnabled(saved);
+          notificationEnabledRef.current = saved;
+        }
+      } catch {
+        // default: enabled
+      }
+
+      // Request notification permission if not granted
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        const permission = await requestPermission();
+        granted = permission === "granted";
+      }
+    };
+    initNotification();
+
+    // Listen for notification click → focus corresponding editor window
+    let unlistenClick: (() => void) | null = null;
+    listen<{ project_path: string }>("notification-clicked", async (event) => {
+      const projectPath = event.payload.project_path;
+      if (!projectPath) return;
+      const projectName = projectPath.split("/").pop() || projectPath;
+      const bundleId = currentBundleIdRef.current;
+      if (!bundleId) return;
+
+      // 1. タブバーを即座に表示
+      const appWindow = getCurrentWindow();
+      await appWindow.show();
+      isVisibleRef.current = true;
+
+      // 通知クリック = 確認済みなので waiting バッジを消す
+      if (claudeStatusesRef.current[projectPath] === "waiting") {
+        dismissedWaitingRef.current.add(projectPath);
+        setClaudeStatuses(prev => {
+          const next = { ...prev };
+          delete next[projectPath];
+          return next;
+        });
+      }
+
+      // 2. macOSの通知クリックによるアプリアクティベーション完了を待つ
+      //    通知クリックは送信元アプリ（タブマネージャ）をアクティベートするため、
+      //    その処理完了後にエディタをアクティベートする必要がある
+      await new Promise(r => setTimeout(r, 500));
+
+      // 3. マッチするウィンドウがあればフォーカス、なければ最初のウィンドウをフォーカス
+      const win = windowsRef.current.find(w => w.name === projectName);
+      if (win) {
+        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+      } else if (windowsRef.current.length > 0) {
+        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: windowsRef.current[0].id });
+      }
+    }).then(u => { unlistenClick = u; });
+
+    return () => {
+      unlistenClick?.();
+    };
+  }, []);
+
+  // Notification toggle handler
+  const handleNotificationToggle = useCallback(async (enabled: boolean) => {
+    setNotificationEnabled(enabled);
+    notificationEnabledRef.current = enabled;
+    try {
+      const store = await getStore();
+      await store.set("notification:enabled", enabled);
+    } catch (error) {
+      console.error("Failed to save notification setting:", error);
+    }
+  }, []);
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -445,6 +527,23 @@ function App() {
           filtered[path] = status;
         }
 
+        // generating → waiting の遷移を検出（= 生成完了 → デスクトップ通知）
+        const completedPaths = Object.keys(filtered).filter(
+          path => filtered[path] === "waiting" && prev[path] === "generating"
+        );
+
+        if (completedPaths.length > 0 && notificationEnabledRef.current && !isEditorActiveRef.current) {
+          for (const path of completedPaths) {
+            const projectName = path.split("/").pop() || path;
+            invoke("send_notification", {
+              title: projectName,
+              subtitle: "Claude Code",
+              body: "Generation complete ✅",
+              project_path: path,
+            });
+          }
+        }
+
         // ref は常に生のバックエンド状態を保持
         claudeStatusesRef.current = newStatuses;
 
@@ -663,7 +762,13 @@ function App() {
           claudeStatuses={claudeStatuses}
         />
       )}
-      {showSettings && <Settings onClose={handleSettingsClose} />}
+      {showSettings && (
+        <Settings
+          onClose={handleSettingsClose}
+          notificationEnabled={notificationEnabled}
+          onNotificationToggle={handleNotificationToggle}
+        />
+      )}
     </>
   );
 }

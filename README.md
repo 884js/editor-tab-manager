@@ -44,21 +44,22 @@
 
 ## Why This App?
 
-複数のプロジェクトを同時に開発していると、エディタのウィンドウが増えていき、目的のウィンドウを探すのに時間がかかりませんか？
+When working on multiple projects simultaneously, editor windows pile up and finding the right one becomes a hassle.
 
-**Editor Tab Manager** は、ブラウザのタブバーのような UI で全てのエディタウィンドウを一覧表示します。`Cmd+1` 〜 `Cmd+9` のショートカットで瞬時に切り替え、作業効率を大幅に向上させます。
+**Editor Tab Manager** displays all your editor windows in a browser-like tab bar. Switch instantly with `Cmd+1` through `Cmd+9` shortcuts, dramatically improving your workflow efficiency.
 
 ### Why not Multi-root Workspaces?
 
-[マルチルートワークスペース](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces)でも複数プロジェクトを扱えますが、独立したウィンドウなら「1ウィンドウ = 1プロジェクト」の明確な境界で集中しやすく、VSCode・Cursor・Zed それぞれで同じ操作感で使えます。
+While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) can handle multiple projects, separate windows provide a clear "one window = one project" boundary that helps you stay focused — and it works the same way across VSCode, Cursor, and Zed.
 
 ## Features
 
-- **Tab Bar UI** - 全てのエディタウィンドウを常に表示されるタブバーで一覧
-- **Quick Switching** - `Cmd+1` 〜 `Cmd+9` でタブを瞬時に切り替え
-- **Multi-Editor Support** - VSCode, Cursor, Zed をサポート
-- **Custom Tab Order** - ドラッグ＆ドロップでタブを並び替え、順序は再起動後も保持
-- **Claude Code Integration** - Claude Code のタスク待機状態をバッジで通知
+- **Tab Bar UI** - View all editor windows in an always-visible tab bar
+- **Quick Switching** - Switch tabs instantly with `Cmd+1` through `Cmd+9`
+- **Multi-Editor Support** - Works with VSCode, Cursor, and Zed
+- **Custom Tab Order** - Drag and drop to reorder tabs; order persists across restarts
+- **Claude Code Integration** - Badge notifications for Claude Code task status
+- **Desktop Notifications** - Get notified when Claude Code finishes generating while you're in another project
 
 ## Supported Editors
 
@@ -72,7 +73,7 @@
 
 ### Download
 
-[Releases ページ](https://github.com/884js/vscode-tab-manager/releases) から最新の `.dmg` ファイルをダウンロードしてインストールできます。
+Download the latest `.dmg` file from the [Releases page](https://github.com/884js/vscode-tab-manager/releases) and install it.
 
 ### Build from Source
 
@@ -112,17 +113,17 @@ pnpm tauri build
 
 ### Menu Bar
 
-アプリはメニューバーに常駐します。トレイアイコンをクリックして設定やアプリの終了ができます。
+The app runs in the menu bar. Click the tray icon to access settings or quit the app.
 
 ### Claude Code Integration
 
-[Claude Code](https://claude.ai/code) と連携して、タスクの待機状態をタブバーにバッジ表示します。
+Integrates with [Claude Code](https://claude.ai/code) to display task status badges on the tab bar.
 
 #### Setup
 
-この機能を使うには、Claude Code 側で hooks を設定する必要があります。
+To use this feature, you need to configure hooks in Claude Code.
 
-`~/.claude/settings.json` に以下を追加してください：
+Add the following to your `~/.claude/settings.json`:
 
 ```json
 {
@@ -164,26 +165,34 @@ pnpm tauri build
 }
 ```
 
-この設定により、Claude Code のイベント（プロンプト送信・権限確認・停止）が `/tmp/claude-code-events` に書き込まれます。
+This configuration writes Claude Code events (prompt submission, permission prompts, stops) to `/tmp/claude-code-events`.
+
+> **Tip**: You can also copy this configuration from the Settings panel within the app.
 
 #### How it works
 
-1. ユーザーがプロンプトを送信すると、hooks により `g <path>`（生成中）をイベントファイルに書き込み
-2. Claude Code が権限確認や停止すると、hooks により `w <path>`（待機中）をイベントファイルに書き込み
-3. Editor Tab Manager がファイルを監視し、バッジを表示
-   - 🔵 青バッジ: 入力待ち（waiting）
-   - 🔴 赤バッジ（パルス）: 生成中（generating）
+1. When a user submits a prompt, hooks write `g <path>` (generating) to the event file
+2. When Claude Code hits a permission prompt or stops, hooks write `w <path>` (waiting) to the event file
+3. Editor Tab Manager watches the file and displays badges:
+   - Blue badge: Waiting for input
+   - Red badge (pulsing): Generating
 
-この連携により、別のプロジェクトで作業中でも Claude Code の状態を一目で把握できます。
+4. When Claude Code finishes generating (status changes to waiting), a desktop notification is sent if the editor is not in the foreground
+5. Clicking the notification focuses the corresponding project window
 
-**対応エディタ**: VSCode, Cursor（Claude Code の実行環境として）
+This integration lets you monitor Claude Code status at a glance, even while working in another project.
+
+> **Note**: Notifications are only sent when the editor is in the background. If the editor is already in the foreground, only the badge is updated.
+
+**Supported editors**: VSCode, Cursor (as Claude Code execution environments)
 
 ### Settings
 
-設定画面（トレイアイコンから開く）で以下の項目を設定できます：
+The following options are available in the settings panel (accessible from the tray icon):
 
-- **有効なエディタの選択** - タブバーに表示するエディタを選択
-- **タブの並び順** - タブの表示順序をカスタマイズ
+- **Editor selection** - Choose which editors to display in the tab bar
+- **Tab order** - Customize the display order of tabs
+- **Desktop notifications** - Enable/disable notifications when Claude Code finishes generating
 
 ## Development
 
@@ -215,7 +224,8 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 │       ├── lib.rs         # Tauri setup, commands
 │       ├── editor.rs      # Window detection/manipulation
 │       ├── observer.rs    # App activation observer
-│       └── claude_status.rs # Claude Code integration
+│       ├── claude_status.rs # Claude Code integration
+│       └── notification.rs  # Desktop notification handling
 ```
 
 ## License

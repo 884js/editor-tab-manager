@@ -3,6 +3,7 @@ mod ax_observer;
 mod claude_status;
 mod editor;
 mod editor_config;
+mod notification;
 mod observer;
 mod window_offset;
 
@@ -179,6 +180,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             // Editor commands with bundle_id support
             get_editor_windows,
@@ -196,7 +198,9 @@ pub fn run() {
             // Window offset management
             apply_window_offset,
             restore_window_positions,
-            restore_all_window_positions
+            restore_all_window_positions,
+            // Native notification
+            notification::send_notification
         ])
         .setup(|app| {
             // Set app as accessory (no Dock icon, menu bar only)
@@ -249,6 +253,9 @@ pub fn run() {
 
             // Start Claude Code status watcher
             claude_status::start_claude_status_watcher(app.handle().clone());
+
+            // Setup native notification delegate for click handling
+            notification::setup_notification_delegate(app.handle().clone());
 
             Ok(())
         })
