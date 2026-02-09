@@ -18,6 +18,7 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
-    "notification:default"
+    "notification:default",
+    "dialog:allow-ask"
   ]
 }

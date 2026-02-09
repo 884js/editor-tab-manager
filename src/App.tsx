@@ -5,6 +5,7 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { currentMonitor } from "@tauri-apps/api/window";
 import { load } from "@tauri-apps/plugin-store";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type { Store } from "@tauri-apps/plugin-store";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
@@ -364,15 +365,21 @@ function App() {
   }, [refreshWindows]);
 
   const handleCloseTab = useCallback(async (index: number) => {
-    const window = windowsRef.current[index];
-    if (window) {
+    const win = windowsRef.current[index];
+    if (win) {
+      const ok = await ask(`「${win.name || "Untitled"}」を閉じますか？`, {
+        title: "確認",
+        kind: "warning",
+      });
+      if (!ok) return;
+
       try {
         const bundleId = currentBundleIdRef.current;
         if (!bundleId) {
           console.warn("No bundle_id available, cannot close window");
           return;
         }
-        await invoke("close_editor_window", { bundle_id: bundleId, window_id: window.id });
+        await invoke("close_editor_window", { bundle_id: bundleId, window_id: win.id });
         setTimeout(refreshWindows, 500);
       } catch (error) {
         console.error("Failed to close window:", error);
