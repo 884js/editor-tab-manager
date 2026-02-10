@@ -26,6 +26,8 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 - `App.tsx` - Main component with window state, tab ordering, event handling
 - `components/TabBar.tsx`, `Tab.tsx` - Tab bar UI
 - `components/Settings.tsx` - Settings panel
+- `i18n/` - i18next initialization and locale files (ja/en)
+- `hooks/useLanguage.ts` - Language switching + Store persistence
 
 ### Backend (src-tauri/src/)
 - **lib.rs** - Tauri setup, commands, global shortcuts (Cmd+1-9 for tab switching)
@@ -38,6 +40,15 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 1. **App Activation**: observer.rs detects editor activation → emits `app-activated` → frontend refreshes window list
 2. **Window Operations**: Frontend calls Tauri commands → editor.rs executes AppleScript
 3. **Claude Code Badge**: claude_status.rs watches event log files → emits `claude-status` → frontend shows badge
+4. **i18n**: System language auto-detected via `navigator.language` → i18next resolves to ja/en (fallback: en) → language change persisted to Store + tray menu updated via `update_tray_menu` command
+
+### Internationalization (i18n)
+- **Library**: `i18next` + `react-i18next`
+- **Supported languages**: `ja` (Japanese), `en` (English, fallback)
+- **Translation files**: `src/i18n/locales/{ja,en}.json` (single namespace, ~30 keys)
+- **Persistence**: `language` key in `@tauri-apps/plugin-store` (`tab-order.json`)
+- **Tray menu**: Updated dynamically via `update_tray_menu` Tauri command (lib.rs)
+- When adding new UI strings, add keys to both `ja.json` and `en.json`, then use `t("key")` in components
 
 ### Editor Support
 New editors are added in `editor_config.rs`. Each editor needs:

@@ -1,4 +1,5 @@
 import { useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ClaudeStatus } from "../App";
 
 interface TabProps {
@@ -16,9 +17,10 @@ interface TabProps {
 }
 
 const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus }: TabProps) {
+  const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
-  const displayName = name || "Untitled";
+  const displayName = name || t("app.untitled");
   const shortcutKey = index < 9 ? `Cmd+${index + 1}` : "";
 
   return (
@@ -67,7 +69,7 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
           e.stopPropagation();
           onClose(index);
         }}
-        title="閉じる (Cmd+W)"
+        title={t("tabBar.closeTooltip")}
       >
         ×
       </button>

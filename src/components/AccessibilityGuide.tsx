@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 
 interface AccessibilityGuideProps {
   onPermissionGranted: () => void;
 }
 
 function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
+  const { t } = useTranslation();
+
   const handleOpenSettings = async () => {
     try {
       await invoke("open_accessibility_settings");
@@ -60,7 +63,7 @@ function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
             color: "#ffffff",
           }}
         >
-          アクセシビリティ権限が必要です
+          {t("accessibility.title")}
         </h1>
         <p
           style={{
@@ -70,9 +73,7 @@ function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
             marginBottom: "32px",
           }}
         >
-          Editor Tab Managerがエディタのウィンドウを検出・操作するには、
-          macOSのアクセシビリティ権限が必要です。
-          システム設定から権限を許可してください。
+          {t("accessibility.description")}
         </p>
         <div
           style={{
@@ -97,7 +98,7 @@ function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#0055aa")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#0066cc")}
           >
-            システム設定を開く
+            {t("accessibility.openSettings")}
           </button>
           <button
             onClick={handleCheckPermission}
@@ -121,7 +122,7 @@ function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
               e.currentTarget.style.color = "#a0a0a0";
             }}
           >
-            権限を確認
+            {t("accessibility.checkPermission")}
           </button>
         </div>
         <p
@@ -131,8 +132,7 @@ function AccessibilityGuide({ onPermissionGranted }: AccessibilityGuideProps) {
             marginTop: "24px",
           }}
         >
-          設定 → プライバシーとセキュリティ → アクセシビリティ
-          → Editor Tab Managerを有効にしてください
+          {t("accessibility.instructions")}
         </p>
       </div>
     </div>

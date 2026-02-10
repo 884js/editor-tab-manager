@@ -7,6 +7,8 @@ import { load } from "@tauri-apps/plugin-store";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { Store } from "@tauri-apps/plugin-store";
+import { useTranslation } from "react-i18next";
+import i18n from "./i18n";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
@@ -94,6 +96,7 @@ interface ClaudeStatusPayload {
 }
 
 function App() {
+  const { t } = useTranslation();
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
@@ -192,6 +195,16 @@ function App() {
       console.error("Failed to save notification setting:", error);
     }
   }, []);
+
+  // Update tray menu when language changes
+  useEffect(() => {
+    invoke("update_tray_menu", {
+      settings_label: t("tray.settings"),
+      quit_label: t("tray.quit"),
+    }).catch((error) => {
+      console.error("Failed to update tray menu:", error);
+    });
+  }, [t]);
 
   // Check accessibility permission on startup
   useEffect(() => {
@@ -372,8 +385,8 @@ function App() {
   const handleCloseTab = useCallback(async (index: number) => {
     const win = windowsRef.current[index];
     if (win) {
-      const ok = await ask(`「${win.name || "Untitled"}」を閉じますか？`, {
-        title: "確認",
+      const ok = await ask(t("app.closeConfirm", { name: win.name || t("app.untitled") }), {
+        title: t("app.closeConfirmTitle"),
         kind: "warning",
       });
       if (!ok) return;
@@ -550,7 +563,7 @@ function App() {
             invoke("send_notification", {
               title: projectName,
               subtitle: "Claude Code",
-              body: "Generation complete ✅",
+              body: i18n.t("app.notificationBody"),
               project_path: path,
             });
           }

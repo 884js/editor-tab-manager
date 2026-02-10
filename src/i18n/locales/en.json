@@ -1,0 +1,41 @@
+{
+  "app": {
+    "closeConfirm": "Close \"{{name}}\"?",
+    "closeConfirmTitle": "Confirm",
+    "notificationBody": "Generation complete ✅",
+    "untitled": "Untitled"
+  },
+  "tabBar": {
+    "newEditorTooltip": "Open new editor window (Cmd+Shift+T)",
+    "closeTooltip": "Close (Cmd+W)"
+  },
+  "settings": {
+    "title": "Settings",
+    "claudeIntegration": "Claude Code Integration",
+    "claudeDescription": "Display Claude Code status as badges on the tab bar and send desktop notifications. Add the following hooks settings.",
+    "step1Label": "Open settings file",
+    "step1Button": "Open ~/.claude/settings.json",
+    "step2Label": "Add the following JSON",
+    "showCode": "Show settings code",
+    "hideCode": "Hide settings code",
+    "copied": "✓ Copied",
+    "copy": "Copy",
+    "step3Label": "Restart Claude Code",
+    "notificationLabel": "Desktop Notifications",
+    "notificationDescription": "Show notification when Claude Code generation completes",
+    "notificationNote": "Not shown when the editor is in the foreground (you can check the badge on the tab bar).",
+    "language": "Language",
+    "languageDescription": "Change UI display language"
+  },
+  "accessibility": {
+    "title": "Accessibility Permission Required",
+    "description": "Editor Tab Manager needs macOS accessibility permission to detect and manage editor windows. Please grant permission in System Settings.",
+    "openSettings": "Open System Settings",
+    "checkPermission": "Check Permission",
+    "instructions": "Settings → Privacy & Security → Accessibility → Enable Editor Tab Manager"
+  },
+  "tray": {
+    "settings": "Settings...",
+    "quit": "Quit Editor Tab Manager"
+  }
+}

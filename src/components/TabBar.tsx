@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import type { EditorWindow, ClaudeStatus } from "../App";
 
@@ -23,6 +24,7 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
 };
 
 function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses }: TabBarProps) {
+  const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
@@ -80,7 +82,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           style={styles.addButton}
           onClick={onNewTab}
           onMouseDown={(e) => e.stopPropagation()}
-          title="新しいエディタウィンドウを開く (Cmd+Shift+T)"
+          title={t("tabBar.newEditorTooltip")}
         >
           +
         </button>
