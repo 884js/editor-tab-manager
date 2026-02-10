@@ -83,11 +83,14 @@ fn get_menu_bar_height() -> f64 {
     let Some(mtm) = MainThreadMarker::new() else {
         return 25.0; // フォールバック（メインスレッドでない場合）
     };
-    let Some(main_screen) = NSScreen::mainScreen(mtm) else {
+    // NSScreen::screens() の最初の要素が常にプライマリディスプレイ
+    // (NSScreen::mainScreen はフォーカス中ウィンドウのスクリーンを返すため不適切)
+    let screens = NSScreen::screens(mtm);
+    let Some(primary) = screens.firstObject() else {
         return 25.0; // フォールバック
     };
-    let frame = main_screen.frame();
-    let visible_frame = main_screen.visibleFrame();
+    let frame = primary.frame();
+    let visible_frame = primary.visibleFrame();
     // メニューバー高さ = 画面全体の高さ - 可視領域の高さ - 可視領域のY位置
     // (Dockが下にある場合、visible_frame.origin.yがDock分だけ上にずれる)
     let menu_bar_height = frame.size.height - visible_frame.size.height - visible_frame.origin.y;
@@ -147,30 +150,26 @@ pub fn apply_offset(bundle_id: &str, offset_y: f64) -> Result<(), String> {
         }
 
         // 既にオフセットが適用済みかチェック（二重適用防止）
-        if let Some(original) = editor_positions.get(window_id) {
-            let expected_y = original.y + offset_y;
-            // 現在位置が期待位置（元の位置 + オフセット）に近ければ移動済み
-            if (*y - expected_y).abs() < 5.0 {
-                continue;
-            }
+        // 一度オフセットを適用したウィンドウは restore_positions() が呼ばれるまで再適用しない
+        if editor_positions.contains_key(window_id) {
+            continue;
         }
 
-        // Save original position if not already saved
-        if !editor_positions.contains_key(window_id) {
-            editor_positions.insert(
-                *window_id,
-                WindowFrame {
-                    x: *x,
-                    y: *y,
-                    width: *width,
-                    height: *height,
-                },
-            );
-        }
+        // Save original position
+        editor_positions.insert(
+            *window_id,
+            WindowFrame {
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            },
+        );
 
-        // Apply offset: move down by offset_y and reduce height by offset_y
-        let new_y = y + offset_y;
-        let new_height = height - offset_y;
+        // Apply offset: 実際の必要量を計算（macOSが部分的に調整済みの場合に対応）
+        let actual_offset = tab_bar_bottom - y;
+        let new_y = y + actual_offset;
+        let new_height = height - actual_offset;
 
         // Only apply if the new height is still reasonable
         const MIN_WINDOW_HEIGHT: f64 = 100.0;

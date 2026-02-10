@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
-import { currentMonitor } from "@tauri-apps/api/window";
+import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import { load } from "@tauri-apps/plugin-store";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -82,6 +82,7 @@ function sortWindowsByOrder(windows: EditorWindow[], order: string[]): EditorWin
 interface AppActivationPayload {
   app_type: "editor" | "tab_manager" | "other";
   bundle_id: string | null;
+  is_on_primary_screen: boolean;
 }
 
 // Claude Code の状態
@@ -217,14 +218,14 @@ function App() {
 
     const adjustWindowSize = async () => {
       const appWindow = getCurrentWindow();
-      const monitor = await currentMonitor();
-      if (!monitor) return;
-
-      const screenWidth = monitor.size.width / monitor.scaleFactor;
-      const screenHeight = monitor.size.height / monitor.scaleFactor;
 
       if (!hasAccessibilityPermission) {
         // AccessibilityGuide用: 大きいウィンドウ（設定画面と同様）
+        // 現在のモニタに表示
+        const monitor = await currentMonitor();
+        if (!monitor) return;
+        const screenWidth = monitor.size.width / monitor.scaleFactor;
+        const screenHeight = monitor.size.height / monitor.scaleFactor;
         await appWindow.setMaxSize(new LogicalSize(screenWidth, screenHeight));
         await appWindow.setSize(new LogicalSize(600, 400));
         await appWindow.setPosition(new LogicalPosition(
@@ -233,6 +234,10 @@ function App() {
         ));
       } else {
         // 権限許可後: タブバーサイズに戻す
+        // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
+        const monitor = await primaryMonitor();
+        if (!monitor) return;
+        const screenWidth = monitor.size.width / monitor.scaleFactor;
         await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(0, 0));
@@ -634,7 +639,8 @@ function App() {
 
     // Initialize window on startup - always start with tab bar
     const initWindow = async () => {
-      const monitor = await currentMonitor();
+      // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
+      const monitor = await primaryMonitor();
       if (monitor) {
         const screenWidth = monitor.size.width / monitor.scaleFactor;
         await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
@@ -654,7 +660,7 @@ function App() {
       const unlisten = await listen<AppActivationPayload>("app-activated", async (event) => {
         if (!isMounted) return;
 
-        const { app_type, bundle_id } = event.payload;
+        const { app_type, bundle_id, is_on_primary_screen } = event.payload;
 
         if (app_type === "editor" || app_type === "tab_manager") {
           // Editor or our app is active - show the tab bar
@@ -684,19 +690,23 @@ function App() {
             }
           }
         } else {
-          // Other app is active - hide the tab bar
-          // Restore window positions before hiding
-          if (currentBundleIdRef.current) {
-            invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
-              console.error("Failed to restore window positions:", error);
-            });
-          }
+          // Other app is active
           isEditorActiveRef.current = false;
           isTabManagerActiveRef.current = false;
-          if (isVisibleRef.current) {
-            await appWindow.hide();
-            isVisibleRef.current = false;
+
+          if (is_on_primary_screen) {
+            // プライマリモニタの別アプリ → タブバーを非表示、オフセット復元
+            if (currentBundleIdRef.current) {
+              invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
+                console.error("Failed to restore window positions:", error);
+              });
+            }
+            if (isVisibleRef.current) {
+              await appWindow.hide();
+              isVisibleRef.current = false;
+            }
           }
+          // セカンダリモニタの場合 → 何もしない（タブバー表示・オフセット維持）
         }
       });
       cleanupFns.push(unlisten);
@@ -735,8 +745,9 @@ function App() {
   const handleSettingsClose = useCallback(async () => {
     setShowSettings(false);
     // Restore to tab bar size with maxHeight restriction
+    // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
     const appWindow = getCurrentWindow();
-    const monitor = await currentMonitor();
+    const monitor = await primaryMonitor();
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
       await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
