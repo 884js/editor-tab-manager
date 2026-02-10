@@ -1,0 +1,41 @@
+{
+  "app": {
+    "closeConfirm": "「{{name}}」を閉じますか？",
+    "closeConfirmTitle": "確認",
+    "notificationBody": "Generation complete ✅",
+    "untitled": "Untitled"
+  },
+  "tabBar": {
+    "newEditorTooltip": "新しいエディタウィンドウを開く (Cmd+Shift+T)",
+    "closeTooltip": "閉じる (Cmd+W)"
+  },
+  "settings": {
+    "title": "設定",
+    "claudeIntegration": "Claude Code 連携",
+    "claudeDescription": "Claude Codeの状態をタブバーのバッジで表示し、デスクトップ通知を送信します。以下のhooks設定を追加してください。",
+    "step1Label": "設定ファイルを開く",
+    "step1Button": "~/.claude/settings.json を開く",
+    "step2Label": "以下のJSONを追加",
+    "showCode": "設定コードを表示",
+    "hideCode": "設定コードを隠す",
+    "copied": "✓ コピー済み",
+    "copy": "コピー",
+    "step3Label": "Claude Codeを再起動",
+    "notificationLabel": "デスクトップ通知",
+    "notificationDescription": "Claude Code生成完了時にデスクトップ通知を表示",
+    "notificationNote": "エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。",
+    "language": "言語",
+    "languageDescription": "UIの表示言語を変更"
+  },
+  "accessibility": {
+    "title": "アクセシビリティ権限が必要です",
+    "description": "Editor Tab Managerがエディタのウィンドウを検出・操作するには、macOSのアクセシビリティ権限が必要です。システム設定から権限を許可してください。",
+    "openSettings": "システム設定を開く",
+    "checkPermission": "権限を確認",
+    "instructions": "設定 → プライバシーとセキュリティ → アクセシビリティ → Editor Tab Managerを有効にしてください"
+  },
+  "tray": {
+    "settings": "設定...",
+    "quit": "Editor Tab Managerを終了"
+  }
+}

@@ -8,7 +8,7 @@ mod observer;
 mod window_offset;
 
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{TrayIconBuilder, TrayIconId};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use editor::{EditorState, EditorWindow};
@@ -110,6 +110,23 @@ fn restore_all_window_positions() -> Result<(), String> {
     window_offset::restore_all_pending()
 }
 
+#[tauri::command(rename_all = "snake_case")]
+fn update_tray_menu(app: AppHandle, settings_label: String, quit_label: String) -> Result<(), String> {
+    let tray = app
+        .tray_by_id(&TrayIconId::new("main"))
+        .ok_or_else(|| "Tray icon not found".to_string())?;
+    let settings_item =
+        MenuItem::with_id(&app, "settings", &settings_label, true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    let quit_item =
+        MenuItem::with_id(&app, "quit", &quit_label, true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(&app, &[&settings_item, &quit_item])
+        .map_err(|e| e.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Cmd+Shift+T: New editor window
     let new_tab_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
@@ -201,7 +218,9 @@ pub fn run() {
             restore_window_positions,
             restore_all_window_positions,
             // Native notification
-            notification::send_notification
+            notification::send_notification,
+            // Tray menu
+            update_tray_menu
         ])
         .setup(|app| {
             // Set app as accessory (no Dock icon, menu bar only)
@@ -220,7 +239,7 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "Quit Editor Tab Manager", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(false)
                 .menu(&menu)

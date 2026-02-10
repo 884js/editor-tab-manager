@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { useLanguage } from "../hooks/useLanguage";
 
 interface SettingsProps {
   onClose: () => void;
@@ -92,6 +94,8 @@ const SETUP_CODE = `{
 }`;
 
 function Settings({ onClose, notificationEnabled, onNotificationToggle }: SettingsProps) {
+  const { t } = useTranslation();
+  const { language, changeLanguage } = useLanguage();
   const [copied, setCopied] = useState(false);
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [closeHover, setCloseHover] = useState(false);
@@ -122,7 +126,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h2 style={styles.title}>設定</h2>
+        <h2 style={styles.title}>{t("settings.title")}</h2>
         <button
           style={{
             ...styles.closeButton,
@@ -139,16 +143,16 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
       <div style={styles.content}>
         {/* Claude Code 連携 */}
         <div style={styles.card}>
-          <h3 style={styles.sectionTitle}>Claude Code 連携</h3>
+          <h3 style={styles.sectionTitle}>{t("settings.claudeIntegration")}</h3>
           <p style={styles.description}>
-            Claude Codeの状態をタブバーのバッジで表示し、デスクトップ通知を送信します。以下のhooks設定を追加してください。
+            {t("settings.claudeDescription")}
           </p>
 
           {/* ステップ1 */}
           <div style={styles.stepRow}>
             <div style={styles.stepNumber}>1</div>
             <div style={styles.stepContent}>
-              <span>設定ファイルを開く</span>
+              <span>{t("settings.step1Label")}</span>
               <button
                 style={{
                   ...styles.openFileButton,
@@ -158,7 +162,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
                 onMouseEnter={() => setOpenFileHover(true)}
                 onMouseLeave={() => setOpenFileHover(false)}
               >
-                ~/.claude/settings.json を開く
+                {t("settings.step1Button")}
               </button>
             </div>
           </div>
@@ -167,7 +171,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
           <div style={styles.stepRow}>
             <div style={styles.stepNumber}>2</div>
             <div style={styles.stepContent}>
-              <span>以下のJSONを追加</span>
+              <span>{t("settings.step2Label")}</span>
               <div style={styles.collapseWrapper}>
                 <div style={styles.collapseHeaderRow}>
                   <button
@@ -188,7 +192,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
                     }}>
                       ▶
                     </span>
-                    設定コードを{codeExpanded ? "隠す" : "表示"}
+                    {codeExpanded ? t("settings.hideCode") : t("settings.showCode")}
                   </button>
                   <button
                     style={{
@@ -200,7 +204,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
                     onMouseEnter={() => setCopyHover(true)}
                     onMouseLeave={() => setCopyHover(false)}
                   >
-                    {copied ? "✓ コピー済み" : "コピー"}
+                    {copied ? t("settings.copied") : t("settings.copy")}
                   </button>
                 </div>
                 {codeExpanded && (
@@ -216,7 +220,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
           <div style={styles.stepRow}>
             <div style={styles.stepNumber}>3</div>
             <div style={styles.stepContent}>
-              <span>Claude Codeを再起動</span>
+              <span>{t("settings.step3Label")}</span>
             </div>
           </div>
 
@@ -224,9 +228,9 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
           <div style={{ borderTop: "1px solid #333333", paddingTop: "14px", marginTop: "2px" }}>
             <div style={styles.switchRow}>
               <div style={styles.switchLabelGroup}>
-                <span style={styles.switchLabel}>デスクトップ通知</span>
+                <span style={styles.switchLabel}>{t("settings.notificationLabel")}</span>
                 <span style={styles.switchDescription}>
-                  Claude Code生成完了時にデスクトップ通知を表示
+                  {t("settings.notificationDescription")}
                 </span>
               </div>
               <div
@@ -245,8 +249,28 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
               </div>
             </div>
             <p style={styles.note}>
-              エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。
+              {t("settings.notificationNote")}
             </p>
+          </div>
+        </div>
+
+        {/* 言語設定 */}
+        <div style={styles.card}>
+          <div style={styles.switchRow}>
+            <div style={styles.switchLabelGroup}>
+              <span style={styles.switchLabel}>{t("settings.language")}</span>
+              <span style={styles.switchDescription}>
+                {t("settings.languageDescription")}
+              </span>
+            </div>
+            <select
+              value={language.startsWith("ja") ? "ja" : "en"}
+              onChange={(e) => changeLanguage(e.target.value)}
+              style={styles.languageSelect}
+            >
+              <option value="ja">日本語</option>
+              <option value="en">English</option>
+            </select>
           </div>
         </div>
       </div>
@@ -459,6 +483,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
   switchThumbActive: {
     transform: "translateX(18px)",
+  },
+  languageSelect: {
+    background: "#2d2d2d",
+    color: "#ffffff",
+    border: "1px solid #555555",
+    borderRadius: "4px",
+    padding: "4px 8px",
+    fontSize: "12px",
+    cursor: "pointer",
+    flexShrink: 0,
   },
 };
 
