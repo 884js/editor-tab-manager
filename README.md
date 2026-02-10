@@ -60,6 +60,7 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 - **Custom Tab Order** - Drag and drop to reorder tabs; order persists across restarts
 - **Claude Code Integration** - Badge notifications for Claude Code task status
 - **Desktop Notifications** - Get notified when Claude Code finishes generating while you're in another project
+- **Multi-language Support** - Japanese and English UI with automatic system language detection
 
 ## Supported Editors
 
@@ -193,6 +194,7 @@ The following options are available in the settings panel (accessible from the t
 - **Editor selection** - Choose which editors to display in the tab bar
 - **Tab order** - Customize the display order of tabs
 - **Desktop notifications** - Enable/disable notifications when Claude Code finishes generating
+- **Language** - Switch between Japanese and English (auto-detected on first launch)
 
 ## Development
 
@@ -218,7 +220,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 ```
 ├── src/                    # Frontend (React + TypeScript)
 │   ├── App.tsx            # Main component
-│   └── components/        # UI components
+│   ├── components/        # UI components
+│   ├── hooks/             # Custom hooks (useLanguage)
+│   └── i18n/              # i18next config and locale files (ja/en)
 ├── src-tauri/             # Backend (Rust + Tauri)
 │   └── src/
 │       ├── lib.rs         # Tauri setup, commands
