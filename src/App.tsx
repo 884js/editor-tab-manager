@@ -313,6 +313,7 @@ function App() {
       try {
         const store = await getStore();
         await store.set("onboarding:completed", true);
+        await store.save();
       } catch (error) {
         console.error("Failed to save onboarding status:", error);
       }
