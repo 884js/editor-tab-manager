@@ -34,6 +34,16 @@
     "checkPermission": "Check Permission",
     "instructions": "Settings → Privacy & Security → Accessibility → Enable Editor Tab Manager"
   },
+  "onboarding": {
+    "welcomeTitle": "Welcome to Editor Tab Manager",
+    "welcomeDescription": "A desktop app that lets you manage multiple editor windows like browser tabs. Quickly switch between VSCode, Cursor, Zed, and more.",
+    "accessibilityTitle": "Accessibility Permission Setup",
+    "accessibilityGranted": "Accessibility permission has been granted",
+    "dontShowAgain": "Don't show this again",
+    "next": "Next",
+    "prev": "Back",
+    "finish": "Finish"
+  },
   "tray": {
     "settings": "Settings...",
     "quit": "Quit Editor Tab Manager"
