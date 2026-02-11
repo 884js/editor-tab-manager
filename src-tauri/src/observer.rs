@@ -2,7 +2,9 @@ use crate::ax_observer;
 use crate::editor_config::is_supported_editor;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSRunningApplication, NSScreen, NSWorkspace};
-use objc2_foundation::{NSNotification, NSNotificationName, NSOperationQueue};
+use objc2_foundation::{
+    NSNotification, NSNotificationCenter, NSNotificationName, NSOperationQueue,
+};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -14,6 +16,9 @@ static OBSERVER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 static DEBOUNCE_VERSION: AtomicU64 = AtomicU64::new(0);
 const DEBOUNCE_DELAY_MS: u64 = 150;
+
+static DISPLAY_DEBOUNCE_VERSION: AtomicU64 = AtomicU64::new(0);
+const DISPLAY_DEBOUNCE_DELAY_MS: u64 = 300;
 
 /// Check if the given app is a supported editor (VSCode, Cursor, etc)
 fn is_target_app(app: &NSRunningApplication) -> bool {
@@ -144,6 +149,44 @@ pub fn start_observer(app_handle: AppHandle) {
                 None,
                 Some(&main_queue),
                 &block,
+            );
+        }
+
+        // Register for display configuration change notifications
+        // NSApplicationDidChangeScreenParametersNotification fires when:
+        // - External monitor connected/disconnected
+        // - Resolution changed
+        // - Clamshell mode toggled
+        let display_notification_name =
+            NSNotificationName::from_str("NSApplicationDidChangeScreenParametersNotification");
+
+        let app_handle_for_display = Arc::clone(&app_handle);
+        let display_block =
+            block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
+                let version =
+                    DISPLAY_DEBOUNCE_VERSION.fetch_add(1, Ordering::SeqCst) + 1;
+                let app_handle_debounce = Arc::clone(&app_handle_for_display);
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(DISPLAY_DEBOUNCE_DELAY_MS));
+                    if DISPLAY_DEBOUNCE_VERSION.load(Ordering::SeqCst) != version {
+                        return;
+                    }
+                    let app_handle_main = Arc::clone(&app_handle_debounce);
+                    let _ = app_handle_debounce.run_on_main_thread(move || {
+                        if let Some(window) = app_handle_main.get_webview_window("main") {
+                            let _ = window.emit("display-changed", ());
+                        }
+                    });
+                });
+            });
+
+        let default_center = NSNotificationCenter::defaultCenter();
+        unsafe {
+            default_center.addObserverForName_object_queue_usingBlock(
+                Some(&display_notification_name),
+                None,
+                Some(&main_queue),
+                &display_block,
             );
         }
 
