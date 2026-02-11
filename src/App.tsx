@@ -12,6 +12,7 @@ import i18n from "./i18n";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
+import Onboarding from "./components/Onboarding";
 
 // タブバーの高さ（px）
 const TAB_BAR_HEIGHT = 36;
@@ -33,7 +34,10 @@ let storePromise: Promise<Store> | null = null;
 
 async function getStore(): Promise<Store> {
   if (!storePromise) {
-    storePromise = load("tab-order.json");
+    storePromise = load("tab-order.json").catch((e) => {
+      storePromise = null; // リセットしてリトライ可能に
+      throw e;
+    });
   }
   return storePromise;
 }
@@ -102,8 +106,10 @@ function App() {
   const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
   const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({});
   const dismissedWaitingRef = useRef<Set<string>>(new Set());
+  const waitingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
   const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const isVisibleRef = useRef(true);
@@ -114,6 +120,45 @@ function App() {
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
+
+  // アクティブタブの waiting バッジ用タイマーを同期する
+  // アクティブタブ以外のタイマーはすべてキャンセルし、
+  // アクティブタブに waiting があれば15秒タイマーを開始
+  const syncWaitingTimerRef = useRef(() => {});
+  syncWaitingTimerRef.current = () => {
+    // 既存タイマーをすべてキャンセル
+    for (const timerId of waitingTimersRef.current.values()) {
+      clearTimeout(timerId);
+    }
+    waitingTimersRef.current.clear();
+
+    // アクティブタブの waiting パスを探す
+    const activeWindow = windowsRef.current[activeIndexRef.current];
+    if (!activeWindow) return;
+
+    for (const [path, status] of Object.entries(claudeStatusesRef.current)) {
+      if (
+        status === "waiting" &&
+        !dismissedWaitingRef.current.has(path) &&
+        path.split("/").pop() === activeWindow.name
+      ) {
+        const timerId = setTimeout(() => {
+          waitingTimersRef.current.delete(path);
+          if (claudeStatusesRef.current[path] === "waiting") {
+            dismissedWaitingRef.current.add(path);
+            setClaudeStatuses((prev) => {
+              const next = { ...prev };
+              delete next[path];
+              return next;
+            });
+          }
+        }, 15_000);
+        waitingTimersRef.current.set(path, timerId);
+        break; // 1プロジェクト1パス
+      }
+    }
+  };
+
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
   const notificationEnabledRef = useRef<boolean>(true);
 
@@ -163,6 +208,11 @@ function App() {
           delete next[projectPath];
           return next;
         });
+        const timer = waitingTimersRef.current.get(projectPath);
+        if (timer) {
+          clearTimeout(timer);
+          waitingTimersRef.current.delete(projectPath);
+        }
       }
 
       // 2. macOSの通知クリックによるアプリアクティベーション完了を待つ
@@ -206,35 +256,105 @@ function App() {
     });
   }, [t]);
 
-  // Check accessibility permission on startup
+  // Check accessibility permission and onboarding status on startup
   useEffect(() => {
-    const checkPermission = async () => {
+    const init = async () => {
+      // Check accessibility permission
+      let hasPermission = true;
       try {
-        const hasPermission = await invoke<boolean>("check_accessibility_permission");
-        setHasAccessibilityPermission(hasPermission);
+        hasPermission = await invoke<boolean>("check_accessibility_permission");
       } catch (error) {
         console.error("Failed to check accessibility permission:", error);
-        // Default to true to avoid blocking the app on error
-        setHasAccessibilityPermission(true);
+      }
+      setHasAccessibilityPermission(hasPermission);
+
+      // Check onboarding status
+      try {
+        const store = await getStore();
+        const completed = await store.get<boolean>("onboarding:completed");
+        if (completed) {
+          setOnboardingCompleted(true);
+          return;
+        }
+
+        // Check if existing user (has order:* keys)
+        let hasOrderKeys = false;
+        try {
+          const keys = await store.keys();
+          hasOrderKeys = keys.some((key) => key.startsWith("order:"));
+        } catch (e) {
+          console.error("Failed to get store keys:", e);
+          // keys()失敗時は既存ユーザーではないとみなす → オンボーディング表示
+        }
+
+        if (hasOrderKeys) {
+          // Existing user - skip onboarding
+          setOnboardingCompleted(true);
+          return;
+        }
+
+        setOnboardingCompleted(false);
+      } catch (error) {
+        console.error("Failed to check onboarding status:", error);
+        // On error, show onboarding (user can dismiss it; next launch will retry)
+        setOnboardingCompleted(false);
       }
     };
-    checkPermission();
+    init();
   }, []);
 
   const handlePermissionGranted = useCallback(() => {
     setHasAccessibilityPermission(true);
   }, []);
 
-  // Adjust window size based on accessibility permission state
+  const handleOnboardingComplete = useCallback(async (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      try {
+        const store = await getStore();
+        await store.set("onboarding:completed", true);
+      } catch (error) {
+        console.error("Failed to save onboarding status:", error);
+      }
+    }
+    setOnboardingCompleted(true);
+    // Re-check accessibility permission
+    try {
+      const hasPermission = await invoke<boolean>("check_accessibility_permission");
+      setHasAccessibilityPermission(hasPermission);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Adjust window size based on onboarding/accessibility state
   useEffect(() => {
-    if (hasAccessibilityPermission === null) return;
+    if (hasAccessibilityPermission === null || onboardingCompleted === null) return;
 
     const adjustWindowSize = async () => {
       const appWindow = getCurrentWindow();
 
-      if (!hasAccessibilityPermission) {
+      if (!onboardingCompleted) {
+        // Onboarding用: 600x500のウィンドウ
+        try {
+          const monitor = await currentMonitor() ?? await primaryMonitor();
+          if (!monitor) {
+            console.error("No monitor found for onboarding window");
+            return;
+          }
+          const screenWidth = monitor.size.width / monitor.scaleFactor;
+          const screenHeight = monitor.size.height / monitor.scaleFactor;
+          await appWindow.setMaxSize(new LogicalSize(screenWidth, screenHeight));
+          await appWindow.setSize(new LogicalSize(600, 500));
+          await appWindow.setPosition(new LogicalPosition(
+            (screenWidth - 600) / 2,
+            (screenHeight - 500) / 2
+          ));
+          await appWindow.show();
+        } catch (error) {
+          console.error("Failed to adjust window size for onboarding:", error);
+        }
+      } else if (!hasAccessibilityPermission) {
         // AccessibilityGuide用: 大きいウィンドウ（設定画面と同様）
-        // 現在のモニタに表示
         const monitor = await currentMonitor();
         if (!monitor) return;
         const screenWidth = monitor.size.width / monitor.scaleFactor;
@@ -247,7 +367,6 @@ function App() {
         ));
       } else {
         // 権限許可後: タブバーサイズに戻す
-        // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
         const monitor = await primaryMonitor();
         if (!monitor) return;
         const screenWidth = monitor.size.width / monitor.scaleFactor;
@@ -258,7 +377,7 @@ function App() {
     };
 
     adjustWindowSize();
-  }, [hasAccessibilityPermission]);
+  }, [hasAccessibilityPermission, onboardingCompleted]);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -327,6 +446,11 @@ function App() {
         const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
+          // タブ切り替え → 旧タイマーキャンセル + 新アクティブタブの waiting チェック
+          // Note: setActiveIndex は非同期なので activeIndexRef はまだ旧値
+          // → activeIndexRef を先に更新してから syncWaitingTimer を呼ぶ
+          activeIndexRef.current = sortedIndex;
+          syncWaitingTimerRef.current();
         }
       }
     } catch (error) {
@@ -360,7 +484,18 @@ function App() {
           delete next[waitingKey];
           return next;
         });
+        const timer = waitingTimersRef.current.get(waitingKey);
+        if (timer) {
+          clearTimeout(timer);
+          waitingTimersRef.current.delete(waitingKey);
+        }
       }
+
+      // クリック元タブのタイマーもキャンセル（別タブに移動するため）
+      for (const timerId of waitingTimersRef.current.values()) {
+        clearTimeout(timerId);
+      }
+      waitingTimersRef.current.clear();
 
       invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
         console.error("Failed to focus window:", error);
@@ -505,6 +640,8 @@ function App() {
       const unlistenSwitch = await listen<number>("switch-to-tab", (event) => {
         if (isMounted && event.payload < windowsRef.current.length) {
           setActiveIndex(event.payload);
+          activeIndexRef.current = event.payload;
+          syncWaitingTimerRef.current();
           const win = windowsRef.current[event.payload];
           const bundleId = currentBundleIdRef.current;
           if (win && bundleId) {
@@ -572,6 +709,9 @@ function App() {
         // ref は常に生のバックエンド状態を保持
         claudeStatusesRef.current = newStatuses;
 
+        // アクティブタブの waiting バッジ自動消去タイマーを同期
+        syncWaitingTimerRef.current();
+
         // waiting → generating の遷移を検出（リセット演出）
         const resetPaths = Object.keys(filtered).filter(
           path => filtered[path] === "generating" && prev[path] === "waiting"
@@ -603,6 +743,10 @@ function App() {
     return () => {
       isMounted = false;
       cleanupFns.forEach((fn) => fn());
+      for (const timerId of waitingTimersRef.current.values()) {
+        clearTimeout(timerId);
+      }
+      waitingTimersRef.current.clear();
     };
   }, []); // Empty dependency array - listeners set up once
 
@@ -641,8 +785,8 @@ function App() {
 
   // Event-driven visibility (no polling)
   useEffect(() => {
-    // 権限が許可されるまでは何もしない（AccessibilityGuideが表示される）
-    if (hasAccessibilityPermission !== true) {
+    // オンボーディング完了 & 権限許可されるまでは何もしない
+    if (hasAccessibilityPermission !== true || onboardingCompleted !== true) {
       return;
     }
 
@@ -753,7 +897,7 @@ function App() {
       isMounted = false;
       cleanupFns.forEach((fn) => fn());
     };
-  }, [fetchWindows, hasAccessibilityPermission]);
+  }, [fetchWindows, hasAccessibilityPermission, onboardingCompleted]);
 
   const handleSettingsClose = useCallback(async () => {
     setShowSettings(false);
@@ -770,9 +914,19 @@ function App() {
   }, []);
 
 
-  // Show loading state while checking permission
-  if (hasAccessibilityPermission === null) {
+  // Show loading state while checking permission/onboarding
+  if (hasAccessibilityPermission === null || onboardingCompleted === null) {
     return null;
+  }
+
+  // Show onboarding for first-time users
+  if (!onboardingCompleted) {
+    return (
+      <Onboarding
+        onComplete={handleOnboardingComplete}
+        hasAccessibilityPermission={hasAccessibilityPermission}
+      />
+    );
   }
 
   // Show accessibility guide if permission not granted

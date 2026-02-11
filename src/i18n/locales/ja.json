@@ -34,6 +34,16 @@
     "checkPermission": "権限を確認",
     "instructions": "設定 → プライバシーとセキュリティ → アクセシビリティ → Editor Tab Managerを有効にしてください"
   },
+  "onboarding": {
+    "welcomeTitle": "Editor Tab Manager へようこそ",
+    "welcomeDescription": "複数のエディタウィンドウをブラウザのタブのように管理できるデスクトップアプリです。VSCode、Cursor、Zedなどのエディタウィンドウをすばやく切り替えましょう。",
+    "accessibilityTitle": "アクセシビリティ権限の設定",
+    "accessibilityGranted": "アクセシビリティ権限は付与済みです",
+    "dontShowAgain": "今後このウィンドウを表示しない",
+    "next": "続く",
+    "prev": "前に",
+    "finish": "完了"
+  },
   "tray": {
     "settings": "設定...",
     "quit": "Editor Tab Managerを終了"
