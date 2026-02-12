@@ -19,6 +19,7 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "notification:default",
-    "dialog:allow-ask"
+    "dialog:allow-ask",
+    "store:default"
   ]
 }

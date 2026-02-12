@@ -117,6 +117,7 @@ function App() {
   const tabOrderRef = useRef<string[]>([]);
   const isEditorActiveRef = useRef(false); // Track if editor (VSCode/Cursor) is currently active
   const isTabManagerActiveRef = useRef(false); // Track if tab_manager itself is currently active
+  const showSettingsRef = useRef(false); // Track if settings panel is open (for display-changed handler)
   const currentBundleIdRef = useRef<string | null>(null); // Current editor's bundle ID
   const orderLoadedRef = useRef(false); // Track if order has been loaded from store
   const lastTabClickTimeRef = useRef<number>(0); // Track when tab was last clicked (for debounce)
@@ -312,6 +313,7 @@ function App() {
       try {
         const store = await getStore();
         await store.set("onboarding:completed", true);
+        await store.save();
       } catch (error) {
         console.error("Failed to save onboarding status:", error);
       }
@@ -380,6 +382,10 @@ function App() {
   }, [hasAccessibilityPermission, onboardingCompleted]);
 
   // Keep refs in sync with state
+  useEffect(() => {
+    showSettingsRef.current = showSettings;
+  }, [showSettings]);
+
   useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
@@ -783,6 +789,18 @@ function App() {
     }
   }, []);
 
+  // Resize tab bar to match primary monitor width
+  const resizeTabBar = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = await primaryMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+      await appWindow.setPosition(new LogicalPosition(0, 0));
+    }
+  }, []);
+
   // Event-driven visibility (no polling)
   useEffect(() => {
     // オンボーディング完了 & 権限許可されるまでは何もしない
@@ -796,14 +814,7 @@ function App() {
 
     // Initialize window on startup - always start with tab bar
     const initWindow = async () => {
-      // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
-      const monitor = await primaryMonitor();
-      if (monitor) {
-        const screenWidth = monitor.size.width / monitor.scaleFactor;
-        await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-        await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-        await appWindow.setPosition(new LogicalPosition(0, 0));
-      }
+      await resizeTabBar();
       await appWindow.show();
       isVisibleRef.current = true;
       isInitializedRef.current = true;
@@ -891,27 +902,33 @@ function App() {
     };
     setupShowSettingsListener();
 
+    // Listen for display configuration changes (monitor connect/disconnect, resolution change)
+    const setupDisplayChangedListener = async () => {
+      const unlisten = await listen("display-changed", async () => {
+        if (!isMounted) return;
+        // Settings が開いている間はタブバーのリサイズをスキップ
+        if (showSettingsRef.current) return;
+        // タブバーを新しいモニターサイズにリサイズ
+        // (ウィンドウオフセットの再適用は observer.rs のメインスレッドで実行済み)
+        await resizeTabBar();
+      });
+      cleanupFns.push(unlisten);
+    };
+    setupDisplayChangedListener();
+
     // No polling - all updates are event-driven via AXObserver and NSWorkspace observer
 
     return () => {
       isMounted = false;
       cleanupFns.forEach((fn) => fn());
     };
-  }, [fetchWindows, hasAccessibilityPermission, onboardingCompleted]);
+  }, [fetchWindows, resizeTabBar, hasAccessibilityPermission, onboardingCompleted]);
 
   const handleSettingsClose = useCallback(async () => {
     setShowSettings(false);
     // Restore to tab bar size with maxHeight restriction
-    // タブバーは常にプライマリモニタに表示されるため primaryMonitor() を使用
-    const appWindow = getCurrentWindow();
-    const monitor = await primaryMonitor();
-    if (monitor) {
-      const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-      await appWindow.setPosition(new LogicalPosition(0, 0));
-    }
-  }, []);
+    await resizeTabBar();
+  }, [resizeTabBar]);
 
 
   // Show loading state while checking permission/onboarding
