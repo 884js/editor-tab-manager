@@ -1,7 +1,10 @@
 import { useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClaudeStatus } from "../App";
-import { getColorById, hexToRgb } from "../constants/tabColors";
+import { getColorById } from "../constants/tabColors";
+
+const blend = (base: number, color: number, ratio: number) =>
+  Math.round(base * (1 - ratio) + color * ratio);
 
 interface TabProps {
   name: string;
@@ -16,7 +19,7 @@ interface TabProps {
   index: number;
   claudeStatus?: ClaudeStatus;
   colorId?: string | null;
-  onContextMenu?: (index: number, e: React.MouseEvent) => void;
+  onContextMenu?: (index: number) => void;
 }
 
 const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu }: TabProps) {
@@ -30,23 +33,19 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
   const colorStyle: React.CSSProperties = {};
   const tabColor = getColorById(colorId);
   if (tabColor) {
-    const rgb = hexToRgb(tabColor.hex);
+    const { r, g, b: bl } = tabColor.rgb;
     colorStyle.borderLeft = `3px solid ${tabColor.hex}`;
     colorStyle.paddingLeft = "9px"; // 12px - 3px border
 
-    // Blend color with dark base to keep opaque and preserve hue
-    const blend = (base: number, color: number, ratio: number) =>
-      Math.round(base * (1 - ratio) + color * ratio);
-
     if (isActive) {
-      const b = 60; // #3c3c3c base
-      colorStyle.background = `rgb(${blend(b, rgb.r, 0.25)}, ${blend(b, rgb.g, 0.25)}, ${blend(b, rgb.b, 0.25)})`;
+      const base = 60; // #3c3c3c
+      colorStyle.background = `rgb(${blend(base, r, 0.25)}, ${blend(base, g, 0.25)}, ${blend(base, bl, 0.25)})`;
     } else if (isHovered) {
-      const b = 51; // #333333 base
-      colorStyle.background = `rgb(${blend(b, rgb.r, 0.2)}, ${blend(b, rgb.g, 0.2)}, ${blend(b, rgb.b, 0.2)})`;
+      const base = 51; // #333333
+      colorStyle.background = `rgb(${blend(base, r, 0.2)}, ${blend(base, g, 0.2)}, ${blend(base, bl, 0.2)})`;
     } else {
-      const b = 42; // #2a2a2a base
-      colorStyle.background = `rgb(${blend(b, rgb.r, 0.15)}, ${blend(b, rgb.g, 0.15)}, ${blend(b, rgb.b, 0.15)})`;
+      const base = 42; // #2a2a2a
+      colorStyle.background = `rgb(${blend(base, r, 0.15)}, ${blend(base, g, 0.15)}, ${blend(base, bl, 0.15)})`;
     }
   }
 
@@ -69,7 +68,7 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       onContextMenu={(e) => {
         e.preventDefault();
         if (!isDragging) {
-          onContextMenu?.(index, e);
+          onContextMenu?.(index);
         }
       }}
       draggable

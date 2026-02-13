@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { TAB_COLOR_PALETTE } from "../constants/tabColors";
 
@@ -10,7 +10,6 @@ interface ColorPickerProps {
 
 function ColorPicker({ currentColorId, onSelect, onClose }: ColorPickerProps) {
   const { t } = useTranslation();
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -26,7 +25,7 @@ function ColorPicker({ currentColorId, onSelect, onClose }: ColorPickerProps) {
     <>
       {/* Overlay to catch outside clicks */}
       <div style={styles.overlay} onClick={onClose} />
-      <div ref={containerRef} style={styles.container}>
+      <div style={styles.container}>
         {TAB_COLOR_PALETTE.map((color) => (
           <button
             key={color.id}

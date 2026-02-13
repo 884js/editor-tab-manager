@@ -59,7 +59,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     onCloseTab(index);
   }, [onCloseTab]);
 
-  const handleTabContextMenu = useCallback((index: number, _e: React.MouseEvent) => {
+  const handleTabContextMenu = useCallback((index: number) => {
     setColorPickerTarget(index);
   }, []);
 

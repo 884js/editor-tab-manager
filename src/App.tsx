@@ -134,7 +134,6 @@ function App() {
   const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
   const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({});
   const [tabColors, setTabColors] = useState<Record<string, string>>({});
-  const tabColorsRef = useRef<Record<string, string>>({});
   const dismissedWaitingRef = useRef<Set<string>>(new Set());
   const waitingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -638,7 +637,6 @@ function App() {
       } else {
         next[windowName] = colorId;
       }
-      tabColorsRef.current = next;
       saveTabColors(currentBundleIdRef.current, next);
       return next;
     });
@@ -832,7 +830,6 @@ function App() {
           loadTabColors(targetBundleId),
         ]);
         tabOrderRef.current = order;
-        tabColorsRef.current = colors;
         setTabColors(colors);
         orderLoadedRef.current = true;
       }
