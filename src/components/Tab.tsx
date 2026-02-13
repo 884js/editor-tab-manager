@@ -1,6 +1,7 @@
 import { useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClaudeStatus } from "../App";
+import { getColorById, hexToRgb } from "../constants/tabColors";
 
 interface TabProps {
   name: string;
@@ -14,14 +15,40 @@ interface TabProps {
   onDrop: (index: number) => void;
   index: number;
   claudeStatus?: ClaudeStatus;
+  colorId?: string | null;
+  onContextMenu?: (index: number, e: React.MouseEvent) => void;
 }
 
-const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus }: TabProps) {
+const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu }: TabProps) {
   const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
   const displayName = name || t("app.untitled");
   const shortcutKey = index < 9 ? `Cmd+${index + 1}` : "";
+
+  // Calculate color styles for the tab
+  const colorStyle: React.CSSProperties = {};
+  const tabColor = getColorById(colorId);
+  if (tabColor) {
+    const rgb = hexToRgb(tabColor.hex);
+    colorStyle.borderLeft = `3px solid ${tabColor.hex}`;
+    colorStyle.paddingLeft = "9px"; // 12px - 3px border
+
+    // Blend color with dark base to keep opaque and preserve hue
+    const blend = (base: number, color: number, ratio: number) =>
+      Math.round(base * (1 - ratio) + color * ratio);
+
+    if (isActive) {
+      const b = 60; // #3c3c3c base
+      colorStyle.background = `rgb(${blend(b, rgb.r, 0.25)}, ${blend(b, rgb.g, 0.25)}, ${blend(b, rgb.b, 0.25)})`;
+    } else if (isHovered) {
+      const b = 51; // #333333 base
+      colorStyle.background = `rgb(${blend(b, rgb.r, 0.2)}, ${blend(b, rgb.g, 0.2)}, ${blend(b, rgb.b, 0.2)})`;
+    } else {
+      const b = 42; // #2a2a2a base
+      colorStyle.background = `rgb(${blend(b, rgb.r, 0.15)}, ${blend(b, rgb.g, 0.15)}, ${blend(b, rgb.b, 0.15)})`;
+    }
+  }
 
   return (
     <div
@@ -30,6 +57,7 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
         ...(isActive ? styles.tabActive : {}),
         ...(isHovered ? styles.tabHover : {}),
         ...(isDragging ? styles.tabDragging : {}),
+        ...colorStyle,
       }}
       onClick={() => {
         setIsHovered(false);
@@ -38,6 +66,12 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       onMouseDown={(e) => e.stopPropagation()}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!isDragging) {
+          onContextMenu?.(index, e);
+        }
+      }}
       draggable
       onDragStart={(e) => {
         e.stopPropagation(); // Tauriのウィンドウドラッグを防止
@@ -83,7 +117,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     height: "32px",
     padding: "0 8px 0 12px",
-    background: "rgba(255, 255, 255, 0.05)",
+    background: "#2a2a2a",
     borderRadius: "6px 6px 0 0",
     cursor: "pointer",
     transition: "transform 0.15s ease-out, opacity 0.2s ease-out",
@@ -92,10 +126,10 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "6px",
   },
   tabActive: {
-    background: "rgba(255, 255, 255, 0.18)",
+    background: "#3c3c3c",
   },
   tabHover: {
-    background: "rgba(255, 255, 255, 0.12)",
+    background: "#333333",
   },
   tabDragging: {
     opacity: 0.5,

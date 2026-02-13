@@ -71,6 +71,33 @@ async function saveTabOrder(bundleId: string | null, order: string[]): Promise<v
   }
 }
 
+// Get color key based on editor bundle ID
+function getColorKey(bundleId: string | null): string {
+  return `tabColor:${bundleId || "default"}`;
+}
+
+// Load tab colors from Store
+async function loadTabColors(bundleId: string | null): Promise<Record<string, string>> {
+  try {
+    const store = await getStore();
+    const key = getColorKey(bundleId);
+    return (await store.get<Record<string, string>>(key)) || {};
+  } catch {
+    return {};
+  }
+}
+
+// Save tab colors to Store
+async function saveTabColors(bundleId: string | null, colors: Record<string, string>): Promise<void> {
+  try {
+    const store = await getStore();
+    const key = getColorKey(bundleId);
+    await store.set(key, colors);
+  } catch (error) {
+    console.error("Failed to save tab colors:", error);
+  }
+}
+
 // Sort windows by custom order, new windows go to the end
 function sortWindowsByOrder(windows: EditorWindow[], order: string[]): EditorWindow[] {
   const orderMap = new Map(order.map((name, index) => [name, index]));
@@ -106,6 +133,8 @@ function App() {
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [claudeStatuses, setClaudeStatuses] = useState<Record<string, ClaudeStatus>>({});
   const claudeStatusesRef = useRef<Record<string, ClaudeStatus>>({});
+  const [tabColors, setTabColors] = useState<Record<string, string>>({});
+  const tabColorsRef = useRef<Record<string, string>>({});
   const dismissedWaitingRef = useRef<Set<string>>(new Set());
   const waitingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -601,6 +630,20 @@ function App() {
     setActiveIndex(newActiveIndex);
   }, []);
 
+  const handleColorChange = useCallback((windowName: string, colorId: string | null) => {
+    setTabColors((prev) => {
+      const next = { ...prev };
+      if (colorId === null) {
+        delete next[windowName];
+      } else {
+        next[windowName] = colorId;
+      }
+      tabColorsRef.current = next;
+      saveTabColors(currentBundleIdRef.current, next);
+      return next;
+    });
+  }, []);
+
   // Refs for callback functions to avoid stale closures in event listeners
   const refreshWindowsRef = useRef(refreshWindows);
   const handleCloseTabRef = useRef(handleCloseTab);
@@ -782,9 +825,15 @@ function App() {
     try {
       const targetBundleId = bundleId ?? currentBundleIdRef.current;
 
-      // Load order from store if bundle changed or not loaded yet
+      // Load order and colors from store if bundle changed or not loaded yet
       if (!orderLoadedRef.current || (bundleId && bundleId !== currentBundleIdRef.current)) {
-        tabOrderRef.current = await loadTabOrder(targetBundleId);
+        const [order, colors] = await Promise.all([
+          loadTabOrder(targetBundleId),
+          loadTabColors(targetBundleId),
+        ]);
+        tabOrderRef.current = order;
+        tabColorsRef.current = colors;
+        setTabColors(colors);
         orderLoadedRef.current = true;
       }
 
@@ -983,6 +1032,8 @@ function App() {
           onCloseTab={handleCloseTab}
           onReorder={handleReorder}
           claudeStatuses={claudeStatuses}
+          tabColors={tabColors}
+          onColorChange={handleColorChange}
         />
       )}
       {showSettings && (
