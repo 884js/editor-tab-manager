@@ -49,5 +49,16 @@
   "tray": {
     "settings": "設定...",
     "quit": "Editor Tab Managerを終了"
+  },
+  "tabColor": {
+    "red": "レッド",
+    "orange": "オレンジ",
+    "yellow": "イエロー",
+    "green": "グリーン",
+    "teal": "ティール",
+    "blue": "ブルー",
+    "purple": "パープル",
+    "pink": "ピンク",
+    "reset": "色をリセット"
   }
 }

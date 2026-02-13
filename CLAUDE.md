@@ -24,8 +24,10 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 ### Frontend (src/)
 - **React + TypeScript** with Vite
 - `App.tsx` - Main component with window state, tab ordering, event handling
-- `components/TabBar.tsx`, `Tab.tsx` - Tab bar UI
+- `components/TabBar.tsx`, `Tab.tsx` - Tab bar UI with per-tab color customization
+- `components/ColorPicker.tsx` - Inline color picker overlay (preset palette)
 - `components/Settings.tsx` - Settings panel
+- `constants/tabColors.ts` - Color palette definitions and utilities
 - `i18n/` - i18next initialization and locale files (ja/en)
 - `hooks/useLanguage.ts` - Language switching + Store persistence
 
@@ -41,6 +43,7 @@ Editor Tab Manager is a Tauri 2 desktop app providing a tab bar UI for managing 
 2. **Window Operations**: Frontend calls Tauri commands → editor.rs executes AppleScript
 3. **Claude Code Badge**: claude_status.rs watches event log files → emits `claude-status` → frontend shows badge
 4. **i18n**: System language auto-detected via `navigator.language` → i18next resolves to ja/en (fallback: en) → language change persisted to Store + tray menu updated via `update_tray_menu` command
+5. **Tab Color**: Right-click tab → ColorPicker overlay → select color → saved to Store (`tabColor:{bundleId}`) → Tab renders left border + background tint
 
 ### Internationalization (i18n)
 - **Library**: `i18next` + `react-i18next`

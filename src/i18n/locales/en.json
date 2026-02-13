@@ -49,5 +49,16 @@
   "tray": {
     "settings": "Settings...",
     "quit": "Quit Editor Tab Manager"
+  },
+  "tabColor": {
+    "red": "Red",
+    "orange": "Orange",
+    "yellow": "Yellow",
+    "green": "Green",
+    "teal": "Teal",
+    "blue": "Blue",
+    "purple": "Purple",
+    "pink": "Pink",
+    "reset": "Reset color"
   }
 }

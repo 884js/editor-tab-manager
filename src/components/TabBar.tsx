@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
+import ColorPicker from "./ColorPicker";
 import type { EditorWindow, ClaudeStatus } from "../App";
 
 interface TabBarProps {
@@ -11,6 +12,8 @@ interface TabBarProps {
   onCloseTab: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   claudeStatuses?: Record<string, ClaudeStatus>;
+  tabColors?: Record<string, string>;
+  onColorChange?: (windowName: string, colorId: string | null) => void;
 }
 
 // フルパスからプロジェクト名を抽出してマッチング
@@ -23,9 +26,10 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
   return undefined;
 };
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses }: TabBarProps) {
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange }: TabBarProps) {
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
     setDraggedIndex(index);
@@ -55,6 +59,24 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     onCloseTab(index);
   }, [onCloseTab]);
 
+  const handleTabContextMenu = useCallback((index: number) => {
+    setColorPickerTarget(index);
+  }, []);
+
+  const handleColorSelect = useCallback((colorId: string | null) => {
+    if (colorPickerTarget !== null) {
+      const tab = tabs[colorPickerTarget];
+      if (tab) {
+        onColorChange?.(tab.name, colorId);
+      }
+    }
+    setColorPickerTarget(null);
+  }, [colorPickerTarget, tabs, onColorChange]);
+
+  const handleColorPickerClose = useCallback(() => {
+    setColorPickerTarget(null);
+  }, []);
+
   return (
     <div style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
@@ -76,6 +98,8 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
             onDrop={handleDrop}
             index={index}
             claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
+            colorId={tabColors?.[tab.name] ?? null}
+            onContextMenu={handleTabContextMenu}
           />
         ))}
         <button
@@ -87,6 +111,14 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           +
         </button>
       </div>
+
+      {colorPickerTarget !== null && (
+        <ColorPicker
+          currentColorId={tabColors?.[tabs[colorPickerTarget]?.name] ?? null}
+          onSelect={handleColorSelect}
+          onClose={handleColorPickerClose}
+        />
+      )}
     </div>
   );
 }
@@ -97,7 +129,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     height: "100%",
     width: "100%",
-    background: "rgba(30, 30, 30, 0.95)",
+    background: "#1e1e1e",
     borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
     position: "relative",
   },
