@@ -20,6 +20,9 @@
     "global-shortcut:allow-is-registered",
     "notification:default",
     "dialog:allow-ask",
-    "store:default"
+    "store:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

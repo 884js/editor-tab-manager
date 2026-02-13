@@ -5,6 +5,7 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import { load } from "@tauri-apps/plugin-store";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { Store } from "@tauri-apps/plugin-store";
 import { useTranslation } from "react-i18next";
@@ -162,6 +163,7 @@ function App() {
 
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
   const notificationEnabledRef = useRef<boolean>(true);
+  const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
 
   // Initialize notification permission and load setting from store
   useEffect(() => {
@@ -233,6 +235,25 @@ function App() {
     return () => {
       unlistenClick?.();
     };
+  }, []);
+
+  // Initialize autostart state
+  useEffect(() => {
+    isEnabled().then(setAutostartEnabled).catch(() => {});
+  }, []);
+
+  // Autostart toggle handler
+  const handleAutostartToggle = useCallback(async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await enable();
+      } else {
+        await disable();
+      }
+      setAutostartEnabled(enabled);
+    } catch (error) {
+      console.error("Failed to toggle autostart:", error);
+    }
   }, []);
 
   // Notification toggle handler
@@ -969,6 +990,8 @@ function App() {
           onClose={handleSettingsClose}
           notificationEnabled={notificationEnabled}
           onNotificationToggle={handleNotificationToggle}
+          autostartEnabled={autostartEnabled}
+          onAutostartToggle={handleAutostartToggle}
         />
       )}
     </>

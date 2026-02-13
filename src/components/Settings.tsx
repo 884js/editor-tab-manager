@@ -8,6 +8,8 @@ interface SettingsProps {
   onClose: () => void;
   notificationEnabled: boolean;
   onNotificationToggle: (enabled: boolean) => void;
+  autostartEnabled: boolean;
+  onAutostartToggle: (enabled: boolean) => void;
 }
 
 function highlightJSON(json: string): React.ReactNode[] {
@@ -93,7 +95,7 @@ const SETUP_CODE = `{
   }
 }`;
 
-function Settings({ onClose, notificationEnabled, onNotificationToggle }: SettingsProps) {
+function Settings({ onClose, notificationEnabled, onNotificationToggle, autostartEnabled, onAutostartToggle }: SettingsProps) {
   const { t } = useTranslation();
   const { language, changeLanguage } = useLanguage();
   const [copied, setCopied] = useState(false);
@@ -251,6 +253,32 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle }: Settin
             <p style={styles.note}>
               {t("settings.notificationNote")}
             </p>
+          </div>
+        </div>
+
+        {/* 自動起動設定 */}
+        <div style={styles.card}>
+          <div style={styles.switchRow}>
+            <div style={styles.switchLabelGroup}>
+              <span style={styles.switchLabel}>{t("settings.autostartLabel")}</span>
+              <span style={styles.switchDescription}>
+                {t("settings.autostartDescription")}
+              </span>
+            </div>
+            <div
+              style={{
+                ...styles.switchTrack,
+                ...(autostartEnabled ? styles.switchTrackActive : {}),
+              }}
+              onClick={() => onAutostartToggle(!autostartEnabled)}
+            >
+              <div
+                style={{
+                  ...styles.switchThumb,
+                  ...(autostartEnabled ? styles.switchThumbActive : {}),
+                }}
+              />
+            </div>
           </div>
         </div>
 

@@ -25,7 +25,9 @@
     "notificationDescription": "Claude Code生成完了時にデスクトップ通知を表示",
     "notificationNote": "エディタが前面にあるときは通知されません（タブバーのバッジで確認できます）。",
     "language": "言語",
-    "languageDescription": "UIの表示言語を変更"
+    "languageDescription": "UIの表示言語を変更",
+    "autostartLabel": "ログイン時に自動起動",
+    "autostartDescription": "PCの起動時にアプリを自動的に起動します"
   },
   "accessibility": {
     "title": "アクセシビリティ権限が必要です",

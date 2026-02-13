@@ -25,7 +25,9 @@
     "notificationDescription": "Show notification when Claude Code generation completes",
     "notificationNote": "Not shown when the editor is in the foreground (you can check the badge on the tab bar).",
     "language": "Language",
-    "languageDescription": "Change UI display language"
+    "languageDescription": "Change UI display language",
+    "autostartLabel": "Launch at Login",
+    "autostartDescription": "Automatically launch the app when your PC starts"
   },
   "accessibility": {
     "title": "Accessibility Permission Required",
