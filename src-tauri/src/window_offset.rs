@@ -97,6 +97,50 @@ fn get_menu_bar_height() -> f64 {
     menu_bar_height.max(0.0)
 }
 
+/// Calculate the maximize frame in AX coordinates (origin top-left, Y down)
+/// Returns (x, y, width, height) accounting for menu bar, tab bar, and Dock
+fn get_maximize_frame(tab_bar_height: f64) -> Result<(f64, f64, f64, f64), String> {
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| "Not on main thread".to_string())?;
+    let screens = NSScreen::screens(mtm);
+    let primary = screens.firstObject()
+        .ok_or_else(|| "No primary screen found".to_string())?;
+
+    let frame = primary.frame();
+    let visible = primary.visibleFrame();
+
+    // menu_bar_height: macOS coords → AX coords conversion
+    let menu_bar_height = (frame.size.height - visible.size.height - visible.origin.y).max(0.0);
+
+    let ax_x = visible.origin.x;
+    let ax_y = menu_bar_height + tab_bar_height;
+    let width = visible.size.width;
+    let height = visible.size.height - tab_bar_height;
+
+    if height < 100.0 || width < 100.0 {
+        return Err("Calculated maximize frame too small".to_string());
+    }
+
+    Ok((ax_x, ax_y, width, height))
+}
+
+/// Maximize a specific window to fill the visible area below the tab bar
+pub fn maximize_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) -> Result<(), String> {
+    let pid = ax_helper::get_pid_by_bundle_id(bundle_id)
+        .ok_or_else(|| format!("Editor not running: {}", bundle_id))?;
+
+    // Skip fullscreen or minimized windows
+    if ax_helper::is_window_fullscreen_by_id(pid, window_id).unwrap_or(false) {
+        return Ok(());
+    }
+    if ax_helper::is_window_minimized_by_id(pid, window_id).unwrap_or(false) {
+        return Ok(());
+    }
+
+    let (ax_x, ax_y, width, height) = get_maximize_frame(tab_bar_height)?;
+    ax_helper::set_window_frame_by_id(pid, window_id, ax_x, ax_y, width, height)
+}
+
 /// Apply window offset for all windows of the specified editor
 ///
 /// This function:

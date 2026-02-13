@@ -552,9 +552,11 @@ function App() {
       }
       waitingTimersRef.current.clear();
 
-      invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id }).catch((error) => {
-        console.error("Failed to focus window:", error);
-      });
+      invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id })
+        .then(() => invoke("maximize_editor_window", { bundle_id: bundleId, window_id: window.id, tab_bar_height: TAB_BAR_HEIGHT }))
+        .catch((error) => {
+          console.error("Failed to focus/maximize window:", error);
+        });
     }
   }, []);
 
@@ -713,7 +715,8 @@ function App() {
           const win = windowsRef.current[event.payload];
           const bundleId = currentBundleIdRef.current;
           if (win && bundleId) {
-            invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+            invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id })
+              .then(() => invoke("maximize_editor_window", { bundle_id: bundleId, window_id: win.id, tab_bar_height: TAB_BAR_HEIGHT }));
           }
         }
       });
