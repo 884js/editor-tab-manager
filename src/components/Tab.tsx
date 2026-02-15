@@ -117,6 +117,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: "32px",
     padding: "0 8px 0 12px",
     background: "#252525",
+    borderBottom: "2px solid transparent",
     borderRadius: "6px 6px 0 0",
     cursor: "pointer",
     transition: "transform 0.15s ease-out, opacity 0.2s ease-out",
