@@ -38,13 +38,13 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
     colorStyle.paddingLeft = "9px"; // 12px - 3px border
 
     if (isActive) {
-      const base = 60; // #3c3c3c
+      const base = 72; // #484848
       colorStyle.background = `rgb(${blend(base, r, 0.25)}, ${blend(base, g, 0.25)}, ${blend(base, bl, 0.25)})`;
     } else if (isHovered) {
       const base = 51; // #333333
       colorStyle.background = `rgb(${blend(base, r, 0.2)}, ${blend(base, g, 0.2)}, ${blend(base, bl, 0.2)})`;
     } else {
-      const base = 42; // #2a2a2a
+      const base = 37; // #252525
       colorStyle.background = `rgb(${blend(base, r, 0.15)}, ${blend(base, g, 0.15)}, ${blend(base, bl, 0.15)})`;
     }
   }
@@ -116,7 +116,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     height: "32px",
     padding: "0 8px 0 12px",
-    background: "#2a2a2a",
+    background: "#252525",
     borderRadius: "6px 6px 0 0",
     cursor: "pointer",
     transition: "transform 0.15s ease-out, opacity 0.2s ease-out",
@@ -125,7 +125,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "6px",
   },
   tabActive: {
-    background: "#3c3c3c",
+    background: "#484848",
+    borderBottom: "2px solid #007aff",
   },
   tabHover: {
     background: "#333333",
