@@ -34,9 +34,6 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
   const tabColor = getColorById(colorId);
   if (tabColor) {
     const { r, g, b: bl } = tabColor.rgb;
-    colorStyle.borderLeft = `3px solid ${tabColor.hex}`;
-    colorStyle.paddingLeft = "9px"; // 12px - 3px border
-
     if (isActive) {
       const base = 72; // #484848
       colorStyle.background = `rgb(${blend(base, r, 0.25)}, ${blend(base, g, 0.25)}, ${blend(base, bl, 0.25)})`;
