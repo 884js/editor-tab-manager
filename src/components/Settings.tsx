@@ -10,6 +10,8 @@ interface SettingsProps {
   onNotificationToggle: (enabled: boolean) => void;
   autostartEnabled: boolean;
   onAutostartToggle: (enabled: boolean) => void;
+  showBranchEnabled: boolean;
+  onShowBranchToggle: (enabled: boolean) => void;
 }
 
 function highlightJSON(json: string): React.ReactNode[] {
@@ -95,7 +97,7 @@ const SETUP_CODE = `{
   }
 }`;
 
-function Settings({ onClose, notificationEnabled, onNotificationToggle, autostartEnabled, onAutostartToggle }: SettingsProps) {
+function Settings({ onClose, notificationEnabled, onNotificationToggle, autostartEnabled, onAutostartToggle, showBranchEnabled, onShowBranchToggle }: SettingsProps) {
   const { t } = useTranslation();
   const { language, changeLanguage } = useLanguage();
   const [copied, setCopied] = useState(false);
@@ -276,6 +278,32 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
                 style={{
                   ...styles.switchThumb,
                   ...(autostartEnabled ? styles.switchThumbActive : {}),
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Gitブランチ表示設定 */}
+        <div style={styles.card}>
+          <div style={styles.switchRow}>
+            <div style={styles.switchLabelGroup}>
+              <span style={styles.switchLabel}>{t("settings.showBranchLabel")}</span>
+              <span style={styles.switchDescription}>
+                {t("settings.showBranchDescription")}
+              </span>
+            </div>
+            <div
+              style={{
+                ...styles.switchTrack,
+                ...(showBranchEnabled ? styles.switchTrackActive : {}),
+              }}
+              onClick={() => onShowBranchToggle(!showBranchEnabled)}
+            >
+              <div
+                style={{
+                  ...styles.switchThumb,
+                  ...(showBranchEnabled ? styles.switchThumbActive : {}),
                 }}
               />
             </div>

@@ -27,7 +27,9 @@
     "language": "言語",
     "languageDescription": "UIの表示言語を変更",
     "autostartLabel": "ログイン時に自動起動",
-    "autostartDescription": "PCの起動時にアプリを自動的に起動します"
+    "autostartDescription": "PCの起動時にアプリを自動的に起動します",
+    "showBranchLabel": "Gitブランチ名を表示",
+    "showBranchDescription": "タブにGitブランチ名を表示します"
   },
   "accessibility": {
     "title": "アクセシビリティ権限が必要です",

@@ -556,6 +556,76 @@ pub fn is_window_minimized_by_id(pid: i32, target_window_id: u32) -> Result<bool
     }
 }
 
+/// Get the document file path from a window by CGWindowID
+/// AXDocument returns a "file:///path/to/file" URL string
+pub fn get_document_path(pid: i32, target_window_id: u32) -> Option<String> {
+    use accessibility_sys::AXUIElementCopyAttributeValue;
+    use core_foundation::base::CFType;
+
+    let app = AXUIElement::application(pid);
+
+    let windows = app.windows().ok()?;
+
+    let window = windows
+        .into_iter()
+        .find(|w| {
+            let role = w.role().ok().map(|s| s.to_string());
+            if role.as_deref() != Some("AXWindow") {
+                return false;
+            }
+            get_window_id(w) == Some(target_window_id)
+        })?;
+
+    unsafe {
+        let attr_name = CFString::from_static_string("AXDocument");
+        let mut result: core_foundation::base::CFTypeRef = std::ptr::null();
+        let err = AXUIElementCopyAttributeValue(
+            window.as_concrete_TypeRef(),
+            attr_name.as_concrete_TypeRef(),
+            &mut result,
+        );
+
+        if err != 0 || result.is_null() {
+            return None;
+        }
+
+        let cf_type = CFType::wrap_under_create_rule(result);
+        let cf_str = CFString::wrap_under_get_rule(
+            cf_type.as_concrete_TypeRef() as core_foundation::string::CFStringRef
+        );
+        let url_str = cf_str.to_string();
+
+        // Remove "file://" prefix and percent-decode the path
+        let path = url_str.strip_prefix("file://")?;
+        Some(percent_decode(path))
+    }
+}
+
+/// Percent-decode a URL-encoded path string (handles multi-byte UTF-8)
+fn percent_decode(input: &str) -> String {
+    let mut bytes = Vec::with_capacity(input.len());
+    let mut chars = input.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let hi = chars.next();
+            let lo = chars.next();
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                let hex = [hi, lo];
+                if let Ok(s) = std::str::from_utf8(&hex) {
+                    if let Ok(val) = u8::from_str_radix(s, 16) {
+                        bytes.push(val);
+                        continue;
+                    }
+                }
+            }
+            bytes.push(b'%');
+        } else {
+            bytes.push(b);
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| input.to_string())
+}
+
 /// Check if a window is fullscreen by CGWindowID
 pub fn is_window_fullscreen_by_id(pid: i32, target_window_id: u32) -> Result<bool, String> {
     use accessibility_sys::AXUIElementCopyAttributeValue;

@@ -20,9 +20,10 @@ interface TabProps {
   claudeStatus?: ClaudeStatus;
   colorId?: string | null;
   onContextMenu?: (index: number) => void;
+  branch?: string;
 }
 
-const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu }: TabProps) {
+const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu, branch }: TabProps) {
   const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
@@ -87,7 +88,12 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       }}
       title={shortcutKey ? `${displayName} (${shortcutKey})` : displayName}
     >
-      <span style={styles.tabName}>{displayName}</span>
+      <div style={styles.tabTextContent}>
+        <span style={styles.tabName}>{displayName}</span>
+        {branch && (
+          <span style={styles.branchName}>{"\u2387"} {branch}</span>
+        )}
+      </div>
       {claudeStatus === "waiting" && <div style={styles.badgeWaiting} />}
       {claudeStatus === "generating" && <div style={styles.badgeGenerating} className="pulse-animation" />}
       <button
@@ -132,6 +138,13 @@ const styles: Record<string, React.CSSProperties> = {
   tabDragging: {
     opacity: 0.5,
   },
+  tabTextContent: {
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    flex: 1,
+    minWidth: 0,
+  },
   tabName: {
     color: "rgba(255, 255, 255, 0.9)",
     fontSize: "12px",
@@ -139,7 +152,14 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    flex: 1,
+  },
+  branchName: {
+    fontSize: "10px",
+    color: "rgba(255, 255, 255, 0.5)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    lineHeight: "1.2",
   },
   closeButton: {
     width: "18px",
