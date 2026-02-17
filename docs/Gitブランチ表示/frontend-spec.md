@@ -47,7 +47,55 @@ export interface EditorWindow {
 
 その他の変更なし。バックエンドからの返却値に `branch` が含まれるため、`invoke<EditorWindow[]>("get_editor_windows", ...)` で取得した結果に自動的に `branch` が反映される。
 
+**showBranch 設定状態の追加**:
+
+```typescript
+const [showBranch, setShowBranch] = useState<boolean>(true);
+```
+
+- 初期化時に Store から `settings:showBranch` を読み込み（デフォルト: true）
+- `handleShowBranchToggle` で State 更新 + Store 永続化
+- TabBar に `showBranch={showBranch}` として渡す
+- Settings に `showBranchEnabled={showBranch}` / `onShowBranchToggle={handleShowBranchToggle}` として渡す
+
+**branch 変更検知の追加**:
+
+`refreshWindows` / `fetchWindows` 内のウィンドウ変更検知に `branch` の比較を追加:
+
+```typescript
+const hasChanged = sorted.length !== currentWindows.length ||
+  sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
+```
+
 **パターン参照**: 「既存の `EditorWindow` 型（`src/App.tsx` L21）に Optional フィールドを追加するパターン」
+
+---
+
+### `Settings.tsx` - ブランチ表示設定トグル
+
+**パス**: `src/components/Settings.tsx`
+
+**役割**: 設定画面にGitブランチ表示のON/OFFトグルを追加する
+
+**Props変更:**
+
+```typescript
+// 追加されたProps
+interface SettingsProps {
+  // ...既存Props...
+  showBranchEnabled: boolean;      // 新規追加
+  onShowBranchToggle: (enabled: boolean) => void;  // 新規追加
+}
+```
+
+**レンダリング**: 自動起動設定の下、言語設定の上にトグルカードを追加。既存の `switchRow` / `switchTrack` / `switchThumb` スタイルパターンを再利用。
+
+**i18n キー（`ja.json` / `en.json` に追加）:**
+
+| キー | ja | en |
+|------|----|----|
+| `settings.showBranchLabel` | Gitブランチ名を表示 | Show Git Branch |
+| `settings.showBranchDescription` | タブにGitブランチ名を表示します | Display Git branch name on tabs |
 
 ---
 
@@ -208,48 +256,27 @@ tabName: {
 
 **変更箇所**: Tab コンポーネントの props 渡し部分（L88-103付近）
 
-**変更内容**: `branch` prop を追加
+**変更内容**: `branch` prop と `showBranch` prop を追加
+
+**TabBarProps の変更:**
 
 ```typescript
-// Before
-<Tab
-  key={tab.name}
-  name={tab.name}
-  isActive={index === activeIndex}
-  isDragging={index === draggedIndex}
-  onClick={handleTabClick}
-  onClose={handleCloseTab}
-  onDragStart={handleDragStart}
-  onDragEnd={handleDragEnd}
-  onDragOver={handleDragOver}
-  onDrop={handleDrop}
-  index={index}
-  claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
-  colorId={tabColors?.[tab.name] ?? null}
-  onContextMenu={handleTabContextMenu}
-/>
+interface TabBarProps {
+  // ...既存Props...
+  showBranch?: boolean;  // 新規追加: ブランチ表示のON/OFF制御
+}
+```
 
-// After
+**Tab への prop 渡し:**
+
+```typescript
 <Tab
-  key={tab.name}
-  name={tab.name}
-  isActive={index === activeIndex}
-  isDragging={index === draggedIndex}
-  onClick={handleTabClick}
-  onClose={handleCloseTab}
-  onDragStart={handleDragStart}
-  onDragEnd={handleDragEnd}
-  onDragOver={handleDragOver}
-  onDrop={handleDrop}
-  index={index}
-  claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
-  colorId={tabColors?.[tab.name] ?? null}
-  onContextMenu={handleTabContextMenu}
-  branch={tab.branch}
+  // ...既存Props...
+  branch={showBranch !== false ? tab.branch : undefined}
 />
 ```
 
-TabBarProps インターフェースの変更は不要。既に `tabs: EditorWindow[]` を受け取っており、`EditorWindow` 型に `branch` が追加されるため自動的に反映される。
+`showBranch` が `false` の場合は `branch` を `undefined` として渡し、Tab 側でブランチ行を非表示にする。
 
 ---
 
@@ -278,25 +305,13 @@ pub struct EditorWindow {
 }
 ```
 
-**変更箇所2**: `get_editor_state_with_config` 関数（L79-83付近）
+**変更箇所2**: `get_editor_state_with_config` / `get_editor_windows_with_config` 関数
 
-EditorWindow 生成時に `branch` フィールドを追加。
+EditorWindow 生成時に `branch` フィールドを追加。多段パス解決 → git root 探索 → ブランチ名取得。
 
 ```rust
-// Before
-windows.push(EditorWindow {
-    id: *window_id,
-    name,
-    path: title.clone(),
-});
-
-// After
-let document_path = ax_helper::get_document_path(pid, *window_id);
-let branch = document_path
-    .and_then(|doc_path| {
-        let dir = std::path::Path::new(&doc_path).parent()?;
-        find_git_root(dir)
-    })
+let branch = resolve_project_path(&name, config.id, pid, *window_id)
+    .and_then(|path| find_git_root(&path).or(Some(path)))
     .and_then(|git_root| get_git_branch(&git_root));
 
 windows.push(EditorWindow {
@@ -307,39 +322,65 @@ windows.push(EditorWindow {
 });
 ```
 
-**変更箇所3**: `get_editor_windows_with_config` 関数（L131-136付近）
+**新規関数**: `resolve_project_path`（多段パス解決）
 
-同様に `branch` フィールドを追加。
+プロジェクト名からフルパスを解決する。キャッシュ付き多段フォールバック:
 
 ```rust
-// Before
-Some(EditorWindow {
-    id: *window_id,
-    name,
-    path: title.clone(),
-})
+fn resolve_project_path(
+    project_name: &str,
+    editor_id: &str,
+    pid: i32,
+    window_id: u32,
+) -> Option<PathBuf> {
+    // 1. キャッシュから検索（PROJECT_PATH_CACHE: HashMap<String, PathBuf>）
+    // 2. キャッシュ未初期化 → workspaceStorage から一括読み込み → 再チェック
+    // 3. キャッシュ済みパスのサブディレクトリを検索（サブモジュール等）
+    // 4. フォールバック: AXDocument → find_git_root
+    // 成功時はキャッシュに追加
+}
+```
 
-// After
-let document_path = ax_helper::get_document_path(pid, *window_id);
-let branch = document_path
-    .and_then(|doc_path| {
-        let dir = std::path::Path::new(&doc_path).parent()?;
-        find_git_root(dir)
-    })
-    .and_then(|git_root| get_git_branch(&git_root));
+**グローバルキャッシュ**（`lazy_static`）:
 
-Some(EditorWindow {
-    id: *window_id,
-    name,
-    path: title.clone(),
-    branch,
-})
+```rust
+lazy_static::lazy_static! {
+    /// プロジェクト名 → フルパスのキャッシュ
+    static ref PROJECT_PATH_CACHE: std::sync::Mutex<HashMap<String, PathBuf>> =
+        std::sync::Mutex::new(HashMap::new());
+    /// エディタIDごとの初期化フラグ
+    static ref CACHE_INITIALIZED: std::sync::Mutex<HashMap<String, bool>> =
+        std::sync::Mutex::new(HashMap::new());
+}
+```
+
+**新規関数**: `get_workspace_storage_dir` / `load_workspace_paths`
+
+エディタの workspaceStorage ディレクトリからプロジェクト名→フルパスのマッピングを読み込む:
+
+```rust
+/// エディタIDからworkspaceStorageディレクトリのパスを返す
+fn get_workspace_storage_dir(editor_id: &str) -> Option<PathBuf>
+// cursor → ~/Library/Application Support/Cursor/User/workspaceStorage
+// vscode → ~/Library/Application Support/Code/User/workspaceStorage
+// zed → None（非対応）
+
+/// workspaceStorage内の全workspace.jsonを読み取り、プロジェクト名→フルパスのマッピングを返す
+fn load_workspace_paths(editor_id: &str) -> HashMap<String, PathBuf>
+```
+
+**新規関数**: `percent_decode`
+
+workspaceStorage の URL に含まれるパーセントエンコーディング（スペース、日本語等）をデコード:
+
+```rust
+fn percent_decode(input: &str) -> String
 ```
 
 **新規関数**: `find_git_root`
 
 ```rust
-/// プロジェクトディレクトリから上位に向かって .git ディレクトリを探索し、git root を返す
+/// プロジェクトディレクトリから上位に向かって .git ディレクトリ/ファイルを探索し、git root を返す
 fn find_git_root(start_path: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut current = start_path;
     loop {
@@ -351,13 +392,24 @@ fn find_git_root(start_path: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 ```
 
+**新規関数**: `resolve_git_dir`（サブモジュール対応）
+
+```rust
+/// .git の実体ディレクトリを解決する（サブモジュール対応）
+/// .git がディレクトリ → そのまま返す
+/// .git がファイル（"gitdir: <path>"） → 参照先を解決して返す
+fn resolve_git_dir(git_root: &std::path::Path) -> Option<PathBuf>
+```
+
 **新規関数**: `get_git_branch`
 
 ```rust
 /// .git/HEAD ファイルを読んでブランチ名を取得する
 /// git コマンドに依存せず、ファイル読み取りのみで高速に動作
+/// サブモジュール対応: resolve_git_dir で .git の実体を解決
 fn get_git_branch(git_root: &std::path::Path) -> Option<String> {
-    let head_path = git_root.join(".git").join("HEAD");
+    let git_dir = resolve_git_dir(git_root)?;
+    let head_path = git_dir.join("HEAD");
     let content = std::fs::read_to_string(head_path).ok()?;
     let content = content.trim();
 
@@ -371,6 +423,16 @@ fn get_git_branch(git_root: &std::path::Path) -> Option<String> {
         None
     }
 }
+```
+
+**依存ライブラリ追加**（`Cargo.toml`）:
+
+```toml
+[dependencies]
+dirs = "5"           # ホームディレクトリ取得（workspaceStorage パス解決用）
+
+[dev-dependencies]
+tempfile = "3"       # テスト用一時ディレクトリ
 ```
 
 ---
@@ -412,16 +474,23 @@ pub fn get_document_path(pid: i32, target_window_id: u32) -> Option<String> {
 | 新規ウィンドウ（ファイル未開） | `undefined` | ブランチ行を非表示 |
 | ブランチ名にスラッシュ含む | `"feature/user/login"` | &#x2387; feature/user/login |
 | .git/HEAD 読み取り失敗 | `undefined` | ブランチ行を非表示 |
+| git サブモジュール | `"develop"` | &#x2387; develop（.git ファイルの gitdir 参照を解決） |
+| showBranch 設定が OFF | `undefined`（Tab に渡さない） | ブランチ行を非表示 |
+| パーセントエンコーディングを含むパス | 正常に解決 | 正常に表示（`percent_decode` でデコード） |
 
 ## ファイル構成
 
 | ファイル | 役割 | 操作 |
 |---------|------|------|
-| `src/App.tsx` | EditorWindow 型に branch フィールド追加 | 変更 |
+| `src/App.tsx` | EditorWindow 型に branch 追加、showBranch 設定状態管理、branch 変更検知 | 変更 |
 | `src/components/Tab.tsx` | branch prop 追加、ブランチ名表示UI、スタイル追加 | 変更 |
-| `src/components/TabBar.tsx` | Tab への branch prop 受け渡し | 変更 |
-| `src-tauri/src/editor.rs` | EditorWindow に branch 追加、find_git_root / get_git_branch 関数追加 | 変更 |
+| `src/components/TabBar.tsx` | showBranch prop 追加、Tab への branch prop 受け渡し（showBranch 制御） | 変更 |
+| `src/components/Settings.tsx` | showBranch トグル設定UI追加 | 変更 |
+| `src/i18n/locales/ja.json` | showBranch 設定の日本語ラベル追加 | 変更 |
+| `src/i18n/locales/en.json` | showBranch 設定の英語ラベル追加 | 変更 |
+| `src-tauri/src/editor.rs` | EditorWindow に branch 追加、resolve_project_path / find_git_root / resolve_git_dir / get_git_branch 等追加 | 変更 |
 | `src-tauri/src/ax_helper.rs` | get_document_path 関数追加（AXDocument 属性取得） | 変更 |
+| `src-tauri/Cargo.toml` | dirs / tempfile 依存追加 | 変更 |
 
 ## テスト
 
@@ -430,8 +499,18 @@ pub fn get_document_path(pid: i32, target_window_id: u32) -> Option<String> {
 | `src-tauri/src/editor.rs` (インラインテスト) | find_git_root: gitリポジトリ内のパスで git root を正しく返す | unit |
 | `src-tauri/src/editor.rs` (インラインテスト) | find_git_root: 非gitリポジトリのパスで None を返す | unit |
 | `src-tauri/src/editor.rs` (インラインテスト) | get_git_branch: "ref: refs/heads/main" から "main" を取得 | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | get_git_branch: feature/user/login のようなスラッシュ含むブランチ名 | unit |
 | `src-tauri/src/editor.rs` (インラインテスト) | get_git_branch: detached HEAD でコミットハッシュ先頭7文字を返す | unit |
 | `src-tauri/src/editor.rs` (インラインテスト) | get_git_branch: .git/HEAD がない場合に None を返す | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | get_git_branch: サブモジュール（.git ファイル → gitdir 参照）で正しくブランチ取得 | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | resolve_git_dir: 通常の .git ディレクトリを返す | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | resolve_git_dir: サブモジュールの .git ファイルから実体ディレクトリを解決 | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | percent_decode: 基本的なパーセントエンコーディングのデコード | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | percent_decode: 日本語のパーセントエンコーディングのデコード | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | load_workspace_paths: 非対応エディタで空を返す | unit |
+| `src-tauri/src/editor.rs` (インラインテスト) | get_workspace_storage_dir: 各エディタの正しいパスを返す | unit |
 | (手動テスト) | Tab: branch prop がある場合にブランチ名が表示される | manual |
 | (手動テスト) | Tab: branch prop が undefined の場合にブランチ行が非表示 | manual |
 | (手動テスト) | Tab: 長いブランチ名が ellipsis で省略される | manual |
+| (手動テスト) | Settings: showBranch トグルで表示/非表示が切り替わる | manual |
+| (手動テスト) | Settings: showBranch 設定がアプリ再起動後も保持される | manual |

@@ -21,6 +21,7 @@ Editor Tab Managerで複数のエディタウィンドウを管理する際、�
 - [ ] ブランチ名はプロジェクト名の近くに表示される
 - [ ] Gitリポジトリでないプロジェクトではブランチ名が非表示になる
 - [ ] ブランチが切り替わった場合、次のウィンドウ操作（タブ切り替え等）で表示が更新される
+- [ ] 設定画面からブランチ表示のON/OFFを切り替えられる（デフォルト: ON）
 
 ## スコープ
 
@@ -49,16 +50,35 @@ sequenceDiagram
     Backend->>Frontend: emit("app-activated") <br/>/ emit("windows-changed")
     Frontend->>Backend: invoke("get_editor_windows")
 
-    Note over Backend: 各ウィンドウの path から<br/>プロジェクトディレクトリを特定
+    Note over Backend: 各ウィンドウのプロジェクト名から<br/>プロジェクトディレクトリを解決<br/>(多段フォールバック)
 
     loop 各ウィンドウ
-        Backend->>Backend: git rev-parse --abbrev-ref HEAD<br/>(プロジェクトディレクトリで実行)
+        Backend->>Backend: resolve_project_path<br/>(1. キャッシュ → 2. workspaceStorage<br/>→ 3. サブディレクトリ検索 → 4. AXDocument)
+        Backend->>Backend: find_git_root → resolve_git_dir<br/>→ get_git_branch<br/>(.git/HEAD ファイル読み取り)
     end
 
     Backend-->>Frontend: Vec<EditorWindow><br/>(branch フィールド付き)
-    Frontend->>Frontend: windows state を更新
-    Frontend->>Tab: branch props を渡す
+    Frontend->>Frontend: windows state を更新<br/>(branch 変更も差分検知)
+    Frontend->>Tab: branch props を渡す<br/>(showBranch 設定で制御)
     Tab->>Tab: ブランチ名を表示<br/>(branch が None の場合は非表示)
+```
+
+### 設定フロー: ブランチ表示のON/OFF
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザー
+    participant Settings as Settings.tsx
+    participant App as App.tsx
+    participant TabBar as TabBar.tsx
+    participant Store as Store<br/>(tab-order.json)
+
+    User->>Settings: showBranch トグル操作
+    Settings->>App: onShowBranchToggle(enabled)
+    App->>App: setShowBranch(enabled)
+    App->>Store: store.set("settings:showBranch", enabled)
+    App->>TabBar: showBranch={enabled}
+    TabBar->>TabBar: branch={showBranch !== false ? tab.branch : undefined}
 ```
 
 ### 型の変更
@@ -85,6 +105,19 @@ interface EditorWindow {
 }
 ```
 
+### プロジェクトパス解決（多段フォールバック）
+
+ブランチ名取得にはプロジェクトのフルパスが必要。ウィンドウタイトルからはプロジェクト名のみ取得できるため、以下の多段フォールバックでフルパスを解決する:
+
+1. **キャッシュ**: `PROJECT_PATH_CACHE`（プロジェクト名→PathBuf の HashMap）から検索
+2. **workspaceStorage**: エディタの `~/Library/Application Support/{Editor}/User/workspaceStorage/*/workspace.json` から一括読み込み → キャッシュに格納
+3. **サブディレクトリ検索**: キャッシュ済みパスの子ディレクトリにプロジェクト名と一致する `.git` 付きディレクトリがないか検索
+4. **AXDocument フォールバック**: Accessibility API でウィンドウの開いているドキュメントパスを取得 → `find_git_root` で git root を特定
+
+### サブモジュール対応
+
+`.git` がディレクトリではなくファイルの場合（git サブモジュール）、`gitdir: <path>` の参照先を解決して `.git/HEAD` を読み取る。
+
 ### 更新タイミング
 
 | トリガー | イベント | 結果 |
@@ -97,7 +130,9 @@ interface EditorWindow {
 
 - 新しいイベントやポーリング処理は不要（既存フローへの拡張のみ）
 - Gitリポジトリでないプロジェクトでは `branch: None` となり、UIでは非表示
-- `git` コマンドが利用できない環境では全ウィンドウで `branch: None`
+- `git` コマンドには依存しない（`.git/HEAD` ファイルの直接読み取りで高速に動作）
+- フロントエンドの `refreshWindows` / `fetchWindows` で `branch` の変更も差分検知対象に含む
+- ブランチ表示は設定画面からON/OFF切替可能（Store キー: `settings:showBranch`、デフォルト: ON）
 
 ## 設計ドキュメント
 
@@ -107,6 +142,13 @@ interface EditorWindow {
 | api-spec.md | API設計 | 該当なし（既存コマンドの拡張のみ） |
 | db-spec.md | DB設計 | 該当なし（DB変更なし） |
 | [implementation-plan.md](./implementation-plan.md) | 実装タスク、影響範囲、テスト方針 | 完了 |
+
+## 変更履歴
+
+| 日付 | 変更内容 | 変更理由 |
+|------|---------|---------|
+| 2026-02-17 | 初版作成 | - |
+| 2026-02-17 | showBranch設定トグル、多段パス解決、サブモジュール対応、branch変更検知、i18nキー、依存ライブラリを仕様に反映 | verify で検出された仕様外の追加実装6件を仕様に反映 |
 
 ## 生成情報
 

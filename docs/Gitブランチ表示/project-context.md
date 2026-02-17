@@ -18,11 +18,11 @@
 - DB: なし（ファイルベースのStore: `tab-order.json`）
 
 ## 既存の型定義
-- `EditorWindow` (Rust): id: u32, name: String, path: String
-- `EditorWindow` (TS): id, name, path
+- `EditorWindow` (Rust): id: u32, name: String, path: String, branch: Option<String>
+- `EditorWindow` (TS): id, name, path, branch?
 - `EditorState`: is_active, windows, active_index
-- `TabProps`: name, isActive, isDragging, onClick, onClose, etc.
-- `TabBarProps`: tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange
+- `TabProps`: name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu, branch
+- `TabBarProps`: tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch
 
 ## アーキテクチャパターン
 - ウィンドウ検出: macOS Accessibility API (`AXUIElement`) を直接使用
