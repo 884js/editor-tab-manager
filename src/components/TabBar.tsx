@@ -14,6 +14,7 @@ interface TabBarProps {
   claudeStatuses?: Record<string, ClaudeStatus>;
   tabColors?: Record<string, string>;
   onColorChange?: (windowName: string, colorId: string | null) => void;
+  showBranch?: boolean;
 }
 
 // フルパスからプロジェクト名を抽出してマッチング
@@ -26,7 +27,7 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
   return undefined;
 };
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange }: TabBarProps) {
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch }: TabBarProps) {
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
@@ -100,6 +101,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
             claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
             colorId={tabColors?.[tab.name] ?? null}
             onContextMenu={handleTabContextMenu}
+            branch={showBranch !== false ? tab.branch : undefined}
           />
         ))}
         <button

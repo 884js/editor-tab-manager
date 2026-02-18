@@ -27,7 +27,9 @@
     "language": "Language",
     "languageDescription": "Change UI display language",
     "autostartLabel": "Launch at Login",
-    "autostartDescription": "Automatically launch the app when your PC starts"
+    "autostartDescription": "Automatically launch the app when your PC starts",
+    "showBranchLabel": "Show Git Branch",
+    "showBranchDescription": "Display Git branch name on tabs"
   },
   "accessibility": {
     "title": "Accessibility Permission Required",

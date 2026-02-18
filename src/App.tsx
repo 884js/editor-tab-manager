@@ -22,6 +22,7 @@ export interface EditorWindow {
   id: number;
   name: string;
   path: string;
+  branch?: string;
 }
 
 interface EditorState {
@@ -192,6 +193,7 @@ function App() {
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
   const notificationEnabledRef = useRef<boolean>(true);
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
+  const [showBranch, setShowBranch] = useState<boolean>(true);
 
   // Initialize notification permission and load setting from store
   useEffect(() => {
@@ -203,6 +205,17 @@ function App() {
         if (saved !== null && saved !== undefined) {
           setNotificationEnabled(saved);
           notificationEnabledRef.current = saved;
+        }
+      } catch {
+        // default: enabled
+      }
+
+      // Load showBranch setting from store
+      try {
+        const store = await getStore();
+        const savedBranch = await store.get<boolean>("settings:showBranch");
+        if (savedBranch !== null && savedBranch !== undefined) {
+          setShowBranch(savedBranch);
         }
       } catch {
         // default: enabled
@@ -281,6 +294,17 @@ function App() {
       setAutostartEnabled(enabled);
     } catch (error) {
       console.error("Failed to toggle autostart:", error);
+    }
+  }, []);
+
+  // Show branch toggle handler
+  const handleShowBranchToggle = useCallback(async (enabled: boolean) => {
+    setShowBranch(enabled);
+    try {
+      const store = await getStore();
+      await store.set("settings:showBranch", enabled);
+    } catch (error) {
+      console.error("Failed to save showBranch setting:", error);
     }
   }, []);
 
@@ -469,7 +493,7 @@ function App() {
       // Only update state if windows actually changed (prevents unnecessary re-renders)
       const currentWindows = windowsRef.current;
       const hasChanged = sorted.length !== currentWindows.length ||
-        sorted.some((w, i) => currentWindows[i]?.name !== w.name);
+        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
 
       if (hasChanged) {
         setWindows(sorted);
@@ -846,7 +870,7 @@ function App() {
       // Update windows only if changed
       const currentWindows = windowsRef.current;
       const hasChanged = sorted.length !== currentWindows.length ||
-        sorted.some((w, i) => currentWindows[i]?.name !== w.name);
+        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
 
       if (hasChanged) {
         setWindows(sorted);
@@ -1034,6 +1058,7 @@ function App() {
           claudeStatuses={claudeStatuses}
           tabColors={tabColors}
           onColorChange={handleColorChange}
+          showBranch={showBranch}
         />
       )}
       {showSettings && (
@@ -1043,6 +1068,8 @@ function App() {
           onNotificationToggle={handleNotificationToggle}
           autostartEnabled={autostartEnabled}
           onAutostartToggle={handleAutostartToggle}
+          showBranchEnabled={showBranch}
+          onShowBranchToggle={handleShowBranchToggle}
         />
       )}
     </>
