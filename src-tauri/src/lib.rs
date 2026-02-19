@@ -171,6 +171,10 @@ fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
 
+            if !editor::is_editor_active() {
+                return;
+            }
+
             if shortcut == &new_tab_shortcut {
                 // Emit event to frontend, which knows the current bundle_id
                 if let Some(window) = app_handle.get_webview_window("main") {
