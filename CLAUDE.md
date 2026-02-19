@@ -67,3 +67,4 @@ Window title parsing in `editor.rs` may need adjustment per editor (see `extract
 
 - 常に日本語で会話する
 - コミット前に必ず確認を取る
+- コミットメッセージ、PR、Issueコメントは英語で書く
