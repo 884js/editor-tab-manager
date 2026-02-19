@@ -11,10 +11,10 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-only-blue" alt="macOS">
   <img src="https://img.shields.io/badge/Tauri-2.0-orange" alt="Tauri">
-  <a href="https://github.com/884js/vscode-tab-manager/releases"><img src="https://img.shields.io/github/v/release/884js/vscode-tab-manager" alt="GitHub Release"></a>
-  <a href="https://github.com/884js/vscode-tab-manager/releases"><img src="https://img.shields.io/github/downloads/884js/vscode-tab-manager/total" alt="GitHub Downloads"></a>
-  <a href="https://github.com/884js/vscode-tab-manager/stargazers"><img src="https://img.shields.io/github/stars/884js/vscode-tab-manager" alt="GitHub Stars"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/884js/vscode-tab-manager" alt="License"></a>
+  <a href="https://github.com/884js/editor-tab-manager/releases"><img src="https://img.shields.io/github/v/release/884js/editor-tab-manager" alt="GitHub Release"></a>
+  <a href="https://github.com/884js/editor-tab-manager/releases"><img src="https://img.shields.io/github/downloads/884js/editor-tab-manager/total" alt="GitHub Downloads"></a>
+  <a href="https://github.com/884js/editor-tab-manager/stargazers"><img src="https://img.shields.io/github/stars/884js/editor-tab-manager" alt="GitHub Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/884js/editor-tab-manager" alt="License"></a>
 </p>
 
 ---
@@ -74,7 +74,7 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 
 ### Download
 
-Download the latest `.dmg` file from the [Releases page](https://github.com/884js/vscode-tab-manager/releases) and install it.
+Download the latest `.dmg` file from the [Releases page](https://github.com/884js/editor-tab-manager/releases) and install it.
 
 ### Build from Source
 
@@ -89,8 +89,8 @@ Download the latest `.dmg` file from the [Releases page](https://github.com/884j
 
 ```bash
 # Clone the repository
-git clone https://github.com/884js/vscode-tab-manager.git
-cd vscode-tab-manager
+git clone https://github.com/884js/editor-tab-manager.git
+cd editor-tab-manager
 
 # Install dependencies
 pnpm install

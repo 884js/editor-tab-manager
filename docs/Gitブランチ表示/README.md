@@ -153,7 +153,7 @@ interface EditorWindow {
 ## 生成情報
 
 - 生成日: 2026-02-17
-- 対象プロジェクト: vscode-tab-manager (Editor Tab Manager)
+- 対象プロジェクト: editor-tab-manager (Editor Tab Manager)
 
 ## 次のステップ
 

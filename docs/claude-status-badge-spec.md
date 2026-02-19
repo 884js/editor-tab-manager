@@ -61,9 +61,9 @@ claude_status.rs ──emit("claude-status")──▶ App.tsx
 例:
 
 ```
-g /Users/yukihayashi/Desktop/mywork/vscode-tab-manager
-w /Users/yukihayashi/Desktop/mywork/vscode-tab-manager
-c /Users/yukihayashi/Desktop/mywork/vscode-tab-manager
+g /Users/yukihayashi/Desktop/mywork/editor-tab-manager
+w /Users/yukihayashi/Desktop/mywork/editor-tab-manager
+c /Users/yukihayashi/Desktop/mywork/editor-tab-manager
 ```
 
 ### Payload (`claude-status` イベント)
@@ -71,7 +71,7 @@ c /Users/yukihayashi/Desktop/mywork/vscode-tab-manager
 ```typescript
 interface ClaudeStatusPayload {
   statuses: Record<string, ClaudeStatus>;
-  // key: プロジェクトのフルパス (例: "/Users/.../vscode-tab-manager")
+  // key: プロジェクトのフルパス (例: "/Users/.../editor-tab-manager")
   // value: "generating" | "waiting"
 }
 ```
@@ -109,9 +109,9 @@ interface ClaudeStatusPayload {
 `getClaudeStatusForTab()` がフルパスの末尾ディレクトリ名とタブ名を比較してマッチングする。
 
 ```
-"/Users/yukihayashi/Desktop/mywork/vscode-tab-manager"
+"/Users/yukihayashi/Desktop/mywork/editor-tab-manager"
                                     ↓ split('/').pop()
-                              "vscode-tab-manager"  ←→  tab.name
+                              "editor-tab-manager"  ←→  tab.name
 ```
 
 ## 6. dismissed のライフサイクル
