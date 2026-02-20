@@ -29,7 +29,14 @@
     "autostartLabel": "Launch at Login",
     "autostartDescription": "Automatically launch the app when your PC starts",
     "showBranchLabel": "Show Git Branch",
-    "showBranchDescription": "Display Git branch name on tabs"
+    "showBranchDescription": "Display Git branch name on tabs",
+    "version": "Version",
+    "checkingUpdate": "Checking for updates...",
+    "updateAvailable": "v{{version}} available",
+    "upToDate": "Up to date",
+    "tabSettings": "Settings",
+    "tabAbout": "About",
+    "githubRepo": "GitHub"
   },
   "accessibility": {
     "title": "Accessibility Permission Required",

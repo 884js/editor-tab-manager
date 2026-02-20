@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { useLanguage } from "../hooks/useLanguage";
+import VersionInfo from "./VersionInfo";
 
 interface SettingsProps {
   onClose: () => void;
@@ -100,6 +101,7 @@ const SETUP_CODE = `{
 function Settings({ onClose, notificationEnabled, onNotificationToggle, autostartEnabled, onAutostartToggle, showBranchEnabled, onShowBranchToggle }: SettingsProps) {
   const { t } = useTranslation();
   const { language, changeLanguage } = useLanguage();
+  const [activeTab, setActiveTab] = useState<"settings" | "about">("settings");
   const [copied, setCopied] = useState(false);
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [closeHover, setCloseHover] = useState(false);
@@ -144,7 +146,30 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
         </button>
       </div>
 
+      {/* タブバー */}
+      <div style={styles.tabBar}>
+        <button
+          style={{
+            ...styles.tabButton,
+            ...(activeTab === "settings" ? styles.tabButtonActive : {}),
+          }}
+          onClick={() => setActiveTab("settings")}
+        >
+          {t("settings.tabSettings")}
+        </button>
+        <button
+          style={{
+            ...styles.tabButton,
+            ...(activeTab === "about" ? styles.tabButtonActive : {}),
+          }}
+          onClick={() => setActiveTab("about")}
+        >
+          {t("settings.tabAbout")}
+        </button>
+      </div>
+
       <div style={styles.content}>
+        {activeTab === "settings" && <>
         {/* Claude Code 連携 */}
         <div style={styles.card}>
           <h3 style={styles.sectionTitle}>{t("settings.claudeIntegration")}</h3>
@@ -329,6 +354,12 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
             </select>
           </div>
         </div>
+
+        </>}
+
+        {activeTab === "about" && <>
+          <VersionInfo />
+        </>}
       </div>
     </div>
   );
@@ -352,6 +383,26 @@ const styles: Record<string, React.CSSProperties> = {
     paddingBottom: "12px",
     borderBottom: "1px solid #404040",
     flexShrink: 0,
+  },
+  tabBar: {
+    display: "flex",
+    gap: "0",
+    borderBottom: "1px solid #404040",
+    flexShrink: 0,
+  },
+  tabButton: {
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    color: "#888888",
+    fontSize: "13px",
+    padding: "10px 16px",
+    cursor: "pointer",
+    transition: "color 0.15s ease, border-color 0.15s ease",
+  },
+  tabButtonActive: {
+    color: "#ffffff",
+    borderBottomColor: "#0066cc",
   },
   content: {
     flex: 1,

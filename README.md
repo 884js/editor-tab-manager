@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Tauri-2.0-orange" alt="Tauri">
   <a href="https://github.com/884js/editor-tab-manager/releases"><img src="https://img.shields.io/github/v/release/884js/editor-tab-manager" alt="GitHub Release"></a>
   <a href="https://github.com/884js/editor-tab-manager/releases"><img src="https://img.shields.io/github/downloads/884js/editor-tab-manager/total" alt="GitHub Downloads"></a>
-  <a href="https://github.com/884js/editor-tab-manager/stargazers"><img src="https://img.shields.io/github/stars/884js/editor-tab-manager" alt="GitHub Stars"></a>
+  <a href="https://github.com/884js/editor-tab-manager/stargazers"><img src="https://img.shields.io/github/stars/884js/vscode-tab-manager" alt="GitHub Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/884js/editor-tab-manager" alt="License"></a>
 </p>
 
@@ -189,11 +189,14 @@ This integration lets you monitor Claude Code status at a glance, even while wor
 
 ### Settings
 
-The following options are available in the settings panel (accessible from the tray icon):
+The settings panel (accessible from the tray icon) has two tabs:
 
-- **Editor selection** - Choose which editors to display in the tab bar
-- **Tab order** - Customize the display order of tabs
-- **Desktop notifications** - Enable/disable notifications when Claude Code finishes generating
+#### Settings Tab
+
+- **Claude Code Integration** - Configure hooks for task status badges and desktop notifications
+- **Desktop Notifications** - Enable/disable notifications when Claude Code finishes generating
+- **Launch at Login** - Automatically start the app when your Mac starts
+- **Show Git Branch** - Display Git branch name on tabs
 - **Language** - Switch between Japanese and English (auto-detected on first launch)
 
 ## Development
