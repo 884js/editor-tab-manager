@@ -22,6 +22,8 @@ interface TabBarProps {
   onAddMenuClose: () => void;
   onHistorySelect: (entry: HistoryEntry) => void;
   onHistoryClear: () => void;
+  onColorPickerOpen: () => Promise<void>;
+  onColorPickerClose: () => void;
 }
 
 // フルパスからプロジェクト名を抽出してマッチング
@@ -34,10 +36,12 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
   return undefined;
 };
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear }: TabBarProps) {
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose }: TabBarProps) {
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
+  const [colorPickerAnchorLeft, setColorPickerAnchorLeft] = useState<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleDragStart = useCallback((index: number) => {
@@ -68,9 +72,14 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     onCloseTab(index);
   }, [onCloseTab]);
 
-  const handleTabContextMenu = useCallback((index: number) => {
+  const handleTabContextMenu = useCallback(async (index: number, rect: DOMRect) => {
+    if (containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      setColorPickerAnchorLeft(rect.left - containerRect.left + rect.width / 2);
+    }
+    await onColorPickerOpen();
     setColorPickerTarget(index);
-  }, []);
+  }, [onColorPickerOpen]);
 
   const handleColorSelect = useCallback((colorId: string | null) => {
     if (colorPickerTarget !== null) {
@@ -80,14 +89,16 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
       }
     }
     setColorPickerTarget(null);
-  }, [colorPickerTarget, tabs, onColorChange]);
+    onColorPickerClose();
+  }, [colorPickerTarget, tabs, onColorChange, onColorPickerClose]);
 
   const handleColorPickerClose = useCallback(() => {
     setColorPickerTarget(null);
-  }, []);
+    onColorPickerClose();
+  }, [onColorPickerClose]);
 
   return (
-    <div style={styles.container}>
+    <div ref={containerRef} style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
       <div style={styles.dragLayer} />
 
@@ -128,6 +139,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           currentColorId={tabColors?.[tabs[colorPickerTarget]?.name] ?? null}
           onSelect={handleColorSelect}
           onClose={handleColorPickerClose}
+          anchorLeft={colorPickerAnchorLeft}
         />
       )}
 

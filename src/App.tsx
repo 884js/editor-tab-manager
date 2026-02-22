@@ -1038,6 +1038,20 @@ function App() {
     }
   }, []);
 
+  const handleColorPickerOpen = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = await primaryMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
+    }
+  }, []);
+
+  const handleColorPickerClose = useCallback(async () => {
+    await resizeTabBar();
+  }, [resizeTabBar]);
+
   const handleAddMenuOpen = useCallback(async () => {
     const appWindow = getCurrentWindow();
     const monitor = await primaryMonitor();
@@ -1217,6 +1231,8 @@ function App() {
           claudeStatuses={claudeStatuses}
           tabColors={tabColors}
           onColorChange={handleColorChange}
+          onColorPickerOpen={handleColorPickerOpen}
+          onColorPickerClose={handleColorPickerClose}
           showBranch={showBranch}
           history={history}
           showAddMenu={showAddMenu}

@@ -19,7 +19,7 @@ interface TabProps {
   index: number;
   claudeStatus?: ClaudeStatus;
   colorId?: string | null;
-  onContextMenu?: (index: number) => void;
+  onContextMenu?: (index: number, rect: DOMRect) => void;
   branch?: string;
 }
 
@@ -66,7 +66,8 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       onContextMenu={(e) => {
         e.preventDefault();
         if (!isDragging) {
-          onContextMenu?.(index);
+          const rect = e.currentTarget.getBoundingClientRect();
+          onContextMenu?.(index, rect);
         }
       }}
       draggable
