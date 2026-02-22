@@ -1,8 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import ColorPicker from "./ColorPicker";
-import type { EditorWindow, ClaudeStatus } from "../App";
+import AddTabMenu from "./AddTabMenu";
+import type { EditorWindow, ClaudeStatus, HistoryEntry } from "../App";
 
 interface TabBarProps {
   tabs: EditorWindow[];
@@ -15,6 +16,14 @@ interface TabBarProps {
   tabColors?: Record<string, string>;
   onColorChange?: (windowName: string, colorId: string | null) => void;
   showBranch?: boolean;
+  history: HistoryEntry[];
+  showAddMenu: boolean;
+  onAddMenuOpen: () => void;
+  onAddMenuClose: () => void;
+  onHistorySelect: (entry: HistoryEntry) => void;
+  onHistoryClear: () => void;
+  onColorPickerOpen: () => Promise<void>;
+  onColorPickerClose: () => void;
 }
 
 // フルパスからプロジェクト名を抽出してマッチング
@@ -27,10 +36,13 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
   return undefined;
 };
 
-function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch }: TabBarProps) {
+function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose }: TabBarProps) {
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
+  const [colorPickerAnchorLeft, setColorPickerAnchorLeft] = useState<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleDragStart = useCallback((index: number) => {
     setDraggedIndex(index);
@@ -60,9 +72,14 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
     onCloseTab(index);
   }, [onCloseTab]);
 
-  const handleTabContextMenu = useCallback((index: number) => {
+  const handleTabContextMenu = useCallback(async (index: number, rect: DOMRect) => {
+    if (containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      setColorPickerAnchorLeft(rect.left - containerRect.left + rect.width / 2);
+    }
+    await onColorPickerOpen();
     setColorPickerTarget(index);
-  }, []);
+  }, [onColorPickerOpen]);
 
   const handleColorSelect = useCallback((colorId: string | null) => {
     if (colorPickerTarget !== null) {
@@ -72,14 +89,16 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
       }
     }
     setColorPickerTarget(null);
-  }, [colorPickerTarget, tabs, onColorChange]);
+    onColorPickerClose();
+  }, [colorPickerTarget, tabs, onColorChange, onColorPickerClose]);
 
   const handleColorPickerClose = useCallback(() => {
     setColorPickerTarget(null);
-  }, []);
+    onColorPickerClose();
+  }, [onColorPickerClose]);
 
   return (
-    <div style={styles.container}>
+    <div ref={containerRef} style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
       <div style={styles.dragLayer} />
 
@@ -105,8 +124,9 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           />
         ))}
         <button
+          ref={addButtonRef}
           style={styles.addButton}
-          onClick={onNewTab}
+          onClick={onAddMenuOpen}
           onMouseDown={(e) => e.stopPropagation()}
           title={t("tabBar.newEditorTooltip")}
         >
@@ -119,6 +139,21 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
           currentColorId={tabColors?.[tabs[colorPickerTarget]?.name] ?? null}
           onSelect={handleColorSelect}
           onClose={handleColorPickerClose}
+          anchorLeft={colorPickerAnchorLeft}
+        />
+      )}
+
+      {showAddMenu && (
+        <AddTabMenu
+          entries={history}
+          currentWindows={tabs}
+          onNewWindow={() => {
+            onNewTab();
+          }}
+          onSelectHistory={onHistorySelect}
+          onClearHistory={onHistoryClear}
+          onClose={onAddMenuClose}
+          anchorRef={addButtonRef}
         />
       )}
     </div>
@@ -129,7 +164,7 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
     alignItems: "center",
-    height: "100%",
+    height: "36px",
     width: "100%",
     background: "#1e1e1e",
     borderBottom: "1px solid rgba(255, 255, 255, 0.1)",

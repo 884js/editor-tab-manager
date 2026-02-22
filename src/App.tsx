@@ -25,6 +25,22 @@ export interface EditorWindow {
   branch?: string;
 }
 
+export interface HistoryEntry {
+  name: string;       // Project name
+  path: string;       // File system path
+  bundleId: string;   // Editor bundle ID
+  editorName: string; // Editor display name
+  timestamp: number;  // Date.now()
+}
+
+const EDITOR_DISPLAY_NAMES: Record<string, string> = {
+  "com.microsoft.VSCode": "VSCode",
+  "com.todesktop.230313mzl4w4u92": "Cursor",
+  "dev.zed.Zed": "Zed",
+};
+
+const MAX_HISTORY_ENTRIES = 20;
+
 interface EditorState {
   is_active: boolean;
   windows: EditorWindow[];
@@ -96,6 +112,26 @@ async function saveTabColors(bundleId: string | null, colors: Record<string, str
     await store.set(key, colors);
   } catch (error) {
     console.error("Failed to save tab colors:", error);
+  }
+}
+
+// Load history from Store
+async function loadHistory(): Promise<HistoryEntry[]> {
+  try {
+    const store = await getStore();
+    return (await store.get<HistoryEntry[]>("history")) || [];
+  } catch {
+    return [];
+  }
+}
+
+// Save history to Store
+async function saveHistory(entries: HistoryEntry[]): Promise<void> {
+  try {
+    const store = await getStore();
+    await store.set("history", entries);
+  } catch (error) {
+    console.error("Failed to save history:", error);
   }
 }
 
@@ -190,6 +226,12 @@ function App() {
     }
   };
 
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const showAddMenuRef = useRef(false);
+  const switchingEditorRef = useRef(false);
+
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
   const notificationEnabledRef = useRef<boolean>(true);
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
@@ -276,6 +318,14 @@ function App() {
     return () => {
       unlistenClick?.();
     };
+  }, []);
+
+  // Load history from store on startup
+  useEffect(() => {
+    loadHistory().then((entries) => {
+      setHistory(entries);
+      historyRef.current = entries;
+    });
   }, []);
 
   // Initialize autostart state
@@ -460,6 +510,14 @@ function App() {
   }, [showSettings]);
 
   useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  useEffect(() => {
+    showAddMenuRef.current = showAddMenu;
+  }, [showAddMenu]);
+
+  useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
 
@@ -496,6 +554,18 @@ function App() {
         sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
 
       if (hasChanged) {
+        // Detect disappeared windows for history (skip during editor switching)
+        if (!switchingEditorRef.current) {
+          const currentBundleId = currentBundleIdRef.current;
+          if (currentBundleId) {
+            const newNames = new Set(sorted.map(w => w.name));
+            const disappeared = currentWindows.filter(w => !newNames.has(w.name) && w.path);
+            if (disappeared.length > 0) {
+              addToHistory(disappeared, currentBundleId);
+            }
+          }
+        }
+
         setWindows(sorted);
         if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
           setActiveIndex(sorted.length - 1);
@@ -597,6 +667,62 @@ function App() {
       console.error("Failed to open new editor:", error);
     }
   }, [refreshWindows]);
+
+  // Add disappeared windows to history
+  const addToHistory = useCallback((disappeared: EditorWindow[], bundleId: string) => {
+    const editorName = EDITOR_DISPLAY_NAMES[bundleId] || bundleId;
+    const now = Date.now();
+
+    setHistory((prev) => {
+      let updated = [...prev];
+
+      for (const win of disappeared) {
+        if (!win.path) continue; // Skip windows without resolved path
+
+        // Remove existing entry with same name + bundleId (will re-add at front)
+        updated = updated.filter(
+          (e) => !(e.name === win.name && e.bundleId === bundleId)
+        );
+
+        // Add to front
+        updated.unshift({
+          name: win.name,
+          path: win.path,
+          bundleId,
+          editorName,
+          timestamp: now,
+        });
+      }
+
+      // Limit to max entries
+      if (updated.length > MAX_HISTORY_ENTRIES) {
+        updated = updated.slice(0, MAX_HISTORY_ENTRIES);
+      }
+
+      historyRef.current = updated;
+      saveHistory(updated);
+      return updated;
+    });
+  }, []);
+
+  const handleOpenFromHistory = useCallback(async (entry: HistoryEntry) => {
+    try {
+      await invoke("open_project_in_editor", {
+        bundle_id: entry.bundleId,
+        path: entry.path,
+      });
+      // Refresh windows after a delay to let the editor open
+      setTimeout(refreshWindows, 1500);
+    } catch (error) {
+      console.error("Failed to open project from history:", error);
+    }
+  }, [refreshWindows]);
+
+  const handleClearHistory = useCallback(() => {
+    setHistory([]);
+    historyRef.current = [];
+    saveHistory([]);
+  }, []);
 
   const handleCloseTab = useCallback(async (index: number) => {
     const win = windowsRef.current[index];
@@ -849,9 +975,15 @@ function App() {
   const fetchWindows = useCallback(async (bundleId?: string | null) => {
     try {
       const targetBundleId = bundleId ?? currentBundleIdRef.current;
+      const isSwitchingEditor = !!(bundleId && bundleId !== currentBundleIdRef.current);
+
+      // Set flag to prevent false history entries during editor switch
+      if (isSwitchingEditor) {
+        switchingEditorRef.current = true;
+      }
 
       // Load order and colors from store if bundle changed or not loaded yet
-      if (!orderLoadedRef.current || (bundleId && bundleId !== currentBundleIdRef.current)) {
+      if (!orderLoadedRef.current || isSwitchingEditor) {
         const [order, colors] = await Promise.all([
           loadTabOrder(targetBundleId),
           loadTabColors(targetBundleId),
@@ -878,10 +1010,21 @@ function App() {
           setActiveIndex(sorted.length - 1);
         }
       }
+
+      // Record current windows to history (so open tabs are also in history)
+      if (sorted.length > 0 && targetBundleId) {
+        addToHistory(sorted, targetBundleId);
+      }
+
+      // Reset switching flag after windows are updated
+      if (isSwitchingEditor) {
+        switchingEditorRef.current = false;
+      }
     } catch (error) {
       console.error("Failed to fetch windows:", error);
+      switchingEditorRef.current = false;
     }
-  }, []);
+  }, [addToHistory]);
 
   // Resize tab bar to match primary monitor width
   const resizeTabBar = useCallback(async () => {
@@ -894,6 +1037,36 @@ function App() {
       await appWindow.setPosition(new LogicalPosition(0, 0));
     }
   }, []);
+
+  const handleColorPickerOpen = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = await primaryMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
+    }
+  }, []);
+
+  const handleColorPickerClose = useCallback(async () => {
+    await resizeTabBar();
+  }, [resizeTabBar]);
+
+  const handleAddMenuOpen = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = await primaryMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 420));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 420));
+    }
+    setShowAddMenu(true);
+  }, []);
+
+  const handleAddMenuClose = useCallback(async () => {
+    setShowAddMenu(false);
+    await resizeTabBar();
+  }, [resizeTabBar]);
 
   // Event-driven visibility (no polling)
   useEffect(() => {
@@ -1000,8 +1173,8 @@ function App() {
     const setupDisplayChangedListener = async () => {
       const unlisten = await listen("display-changed", async () => {
         if (!isMounted) return;
-        // Settings が開いている間はタブバーのリサイズをスキップ
-        if (showSettingsRef.current) return;
+        // Settings またはメニューが開いている間はタブバーのリサイズをスキップ
+        if (showSettingsRef.current || showAddMenuRef.current) return;
         // タブバーを新しいモニターサイズにリサイズ
         // (ウィンドウオフセットの再適用は observer.rs のメインスレッドで実行済み)
         await resizeTabBar();
@@ -1058,7 +1231,15 @@ function App() {
           claudeStatuses={claudeStatuses}
           tabColors={tabColors}
           onColorChange={handleColorChange}
+          onColorPickerOpen={handleColorPickerOpen}
+          onColorPickerClose={handleColorPickerClose}
           showBranch={showBranch}
+          history={history}
+          showAddMenu={showAddMenu}
+          onAddMenuOpen={handleAddMenuOpen}
+          onAddMenuClose={handleAddMenuClose}
+          onHistorySelect={handleOpenFromHistory}
+          onHistoryClear={handleClearHistory}
         />
       )}
       {showSettings && (

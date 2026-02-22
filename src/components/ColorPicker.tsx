@@ -6,9 +6,10 @@ interface ColorPickerProps {
   currentColorId: string | null;
   onSelect: (colorId: string | null) => void;
   onClose: () => void;
+  anchorLeft?: number;
 }
 
-function ColorPicker({ currentColorId, onSelect, onClose }: ColorPickerProps) {
+function ColorPicker({ currentColorId, onSelect, onClose, anchorLeft }: ColorPickerProps) {
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -25,7 +26,15 @@ function ColorPicker({ currentColorId, onSelect, onClose }: ColorPickerProps) {
     <>
       {/* Overlay to catch outside clicks */}
       <div style={styles.overlay} onClick={onClose} />
-      <div style={styles.container}>
+      <div style={{
+        ...styles.container,
+        ...(anchorLeft !== undefined ? {
+          top: "100%",
+          left: `${anchorLeft}px`,
+          transform: "translateX(-50%)",
+          marginTop: "4px",
+        } : {}),
+      }}>
         {TAB_COLOR_PALETTE.map((color) => (
           <button
             key={color.id}

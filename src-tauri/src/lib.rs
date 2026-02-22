@@ -47,6 +47,11 @@ fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String> {
+    editor::open_project_in_editor(bundle_id, path)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 fn maximize_editor_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) -> Result<(), String> {
     window_offset::maximize_window(bundle_id, window_id, tab_bar_height)
 }
@@ -217,6 +222,7 @@ pub fn run() {
             focus_editor_window,
             open_new_editor,
             close_editor_window,
+            open_project_in_editor,
             maximize_editor_window,
             is_editor_active,
             // File operations
