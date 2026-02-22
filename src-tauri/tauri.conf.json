@@ -28,7 +28,8 @@
         "y": 0,
         "visible": true,
         "acceptFirstMouse": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "shadow": false
       }
     ],
     "security": {

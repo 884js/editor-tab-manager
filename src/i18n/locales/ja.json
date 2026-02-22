@@ -59,6 +59,16 @@
     "settings": "設定...",
     "quit": "Editor Tab Managerを終了"
   },
+  "history": {
+    "newWindow": "新規ウィンドウ",
+    "recentProjects": "最近のプロジェクト",
+    "empty": "履歴はありません",
+    "clear": "履歴をクリア",
+    "justNow": "たった今",
+    "minutesAgo": "{{count}}分前",
+    "hoursAgo": "{{count}}時間前",
+    "daysAgo": "{{count}}日前"
+  },
   "tabColor": {
     "red": "レッド",
     "orange": "オレンジ",

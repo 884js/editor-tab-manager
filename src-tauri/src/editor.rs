@@ -88,14 +88,18 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
 
         let name = extract_project_name(title, config);
 
-        let branch = resolve_project_path(&name, config.id, pid, *window_id)
-            .and_then(|path| find_git_root(&path).or(Some(path)))
+        let resolved_path = resolve_project_path(&name, config.id, pid, *window_id);
+        let branch = resolved_path.as_ref()
+            .and_then(|path| find_git_root(path).or(Some(path.clone())))
             .and_then(|git_root| get_git_branch(&git_root));
+        let path_str = resolved_path
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
 
         windows.push(EditorWindow {
             id: *window_id,  // Use CGWindowID for reliable identification
             name,
-            path: title.clone(),
+            path: path_str,
             branch,
         });
 
@@ -145,14 +149,18 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
 
             let name = extract_project_name(title, config);
 
-            let branch = resolve_project_path(&name, config.id, pid, *window_id)
-                .and_then(|path| find_git_root(&path).or(Some(path)))
+            let resolved_path = resolve_project_path(&name, config.id, pid, *window_id);
+            let branch = resolved_path.as_ref()
+                .and_then(|path| find_git_root(path).or(Some(path.clone())))
                 .and_then(|git_root| get_git_branch(&git_root));
+            let path_str = resolved_path
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
 
             Some(EditorWindow {
                 id: *window_id,  // Use CGWindowID for reliable identification
                 name,
-                path: title.clone(),
+                path: path_str,
                 branch,
             })
         })
@@ -411,6 +419,20 @@ pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
         .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
 
     ax_helper::open_new_window_ax(pid)
+}
+
+/// Open a project directory in a specific editor
+pub fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String> {
+    let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
+        .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
+
+    std::process::Command::new("open")
+        .arg("-a")
+        .arg(config.app_name)
+        .arg(path)
+        .spawn()
+        .map_err(|e| format!("Failed to open project: {}", e))?;
+    Ok(())
 }
 
 /// Close a specific editor window by CGWindowID

@@ -59,6 +59,16 @@
     "settings": "Settings...",
     "quit": "Quit Editor Tab Manager"
   },
+  "history": {
+    "newWindow": "New Window",
+    "recentProjects": "Recent Projects",
+    "empty": "No history",
+    "clear": "Clear History",
+    "justNow": "Just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "daysAgo": "{{count}}d ago"
+  },
   "tabColor": {
     "red": "Red",
     "orange": "Orange",
