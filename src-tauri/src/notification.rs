@@ -149,6 +149,20 @@ unsafe extern "C" fn will_present_notification(
     }
 }
 
+/// Remove all delivered notifications from the notification center.
+/// Called when an editor is activated, since the notifications have served their purpose.
+pub fn remove_all_delivered_notifications() {
+    if !has_bundle_identifier() {
+        return;
+    }
+
+    unsafe {
+        let center: *mut AnyObject =
+            msg_send![class!(UNUserNotificationCenter), currentNotificationCenter];
+        let _: () = msg_send![center, removeAllDeliveredNotifications];
+    }
+}
+
 /// Tauri command: send a native notification via UNUserNotificationCenter
 #[tauri::command(rename_all = "snake_case")]
 pub fn send_notification(title: String, subtitle: String, body: String, project_path: String) {

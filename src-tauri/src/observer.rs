@@ -1,5 +1,6 @@
 use crate::ax_observer;
 use crate::editor_config::is_supported_editor;
+use crate::notification;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSRunningApplication, NSScreen, NSWorkspace};
 use objc2_foundation::{
@@ -126,6 +127,7 @@ pub fn start_observer(app_handle: AppHandle) {
             } else if is_target_app(&app) {
                 // Editor is active → cancel pending "other" and emit immediately
                 cancel_pending_other_event();
+                notification::remove_all_delivered_notifications();
                 ax_observer::register_for_editor(bundle_id_str.as_deref().unwrap_or_default());
                 let payload = AppActivationPayload {
                     app_type: "editor".to_string(),
