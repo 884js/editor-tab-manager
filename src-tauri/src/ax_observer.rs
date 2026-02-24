@@ -168,8 +168,14 @@ pub fn register_for_editor(bundle_id: &str) {
     }
 }
 
-/// Register AX observers for ALL running supported editors
+/// Register AX observers for ALL running supported editors.
+/// Skips editors that are already registered (cheap check before full registration).
 pub fn register_all_editors() {
+    let already_registered = {
+        let state = AX_STATE.lock().unwrap();
+        state.observers.keys().copied().collect::<std::collections::HashSet<_>>()
+    };
+
     let workspace = NSWorkspace::sharedWorkspace();
     let apps = workspace.runningApplications();
 
@@ -177,7 +183,9 @@ pub fn register_all_editors() {
         if let Some(bid) = app.bundleIdentifier() {
             if is_supported_editor(&bid.to_string()) {
                 let pid = app.processIdentifier();
-                register_for_pid(pid);
+                if !already_registered.contains(&pid) {
+                    register_for_pid(pid);
+                }
             }
         }
     }

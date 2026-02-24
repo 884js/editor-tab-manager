@@ -41,6 +41,8 @@ const EDITOR_DISPLAY_NAMES: Record<string, string> = {
   "dev.zed.Zed": "Zed",
 };
 
+const ALL_EDITOR_BUNDLE_IDS = Object.keys(EDITOR_DISPLAY_NAMES);
+
 const MAX_HISTORY_ENTRIES = 20;
 
 interface EditorState {
@@ -62,56 +64,44 @@ async function getStore(): Promise<Store> {
   return storePromise;
 }
 
-// Unified order key (all editors share one tab order)
-function getOrderKey(_bundleId?: string | null): string {
-  return "order:unified";
-}
+const UNIFIED_ORDER_KEY = "order:unified";
+const UNIFIED_COLOR_KEY = "tabColor:unified";
 
 // Load tab order from Store
-async function loadTabOrder(bundleId?: string | null): Promise<string[]> {
+async function loadTabOrder(): Promise<string[]> {
   try {
     const store = await getStore();
-    const key = getOrderKey(bundleId);
-    const saved = await store.get<string[]>(key);
-    return saved || [];
+    return (await store.get<string[]>(UNIFIED_ORDER_KEY)) || [];
   } catch {
     return [];
   }
 }
 
 // Save tab order to Store
-async function saveTabOrder(bundleId: string | null | undefined, order: string[]): Promise<void> {
+async function saveTabOrder(order: string[]): Promise<void> {
   try {
     const store = await getStore();
-    const key = getOrderKey(bundleId);
-    await store.set(key, order);
+    await store.set(UNIFIED_ORDER_KEY, order);
   } catch (error) {
     console.error("Failed to save tab order:", error);
   }
 }
 
-// Unified color key (all editors share one color map)
-function getColorKey(_bundleId?: string | null): string {
-  return "tabColor:unified";
-}
-
 // Load tab colors from Store
-async function loadTabColors(bundleId?: string | null): Promise<Record<string, string>> {
+async function loadTabColors(): Promise<Record<string, string>> {
   try {
     const store = await getStore();
-    const key = getColorKey(bundleId);
-    return (await store.get<Record<string, string>>(key)) || {};
+    return (await store.get<Record<string, string>>(UNIFIED_COLOR_KEY)) || {};
   } catch {
     return {};
   }
 }
 
 // Save tab colors to Store
-async function saveTabColors(bundleId: string | null | undefined, colors: Record<string, string>): Promise<void> {
+async function saveTabColors(colors: Record<string, string>): Promise<void> {
   try {
     const store = await getStore();
-    const key = getColorKey(bundleId);
-    await store.set(key, colors);
+    await store.set(UNIFIED_COLOR_KEY, colors);
   } catch (error) {
     console.error("Failed to save tab colors:", error);
   }
@@ -436,6 +426,10 @@ function App() {
               await store.set("tabColor:unified", mergedColors);
             }
           }
+          // Remove old per-editor keys to prevent re-migration
+          for (const key of [...orderKeys, ...colorKeys]) {
+            await store.delete(key);
+          }
           await store.save();
         }
       } catch (error) {
@@ -631,9 +625,11 @@ function App() {
 
       // Sync activeIndex with frontmost editor window
       if (state.active_index !== null && state.windows.length > 0) {
-        const frontmostName = state.windows[state.active_index]?.name;
-        // Find this window in our unified (sorted) tab list
-        const sortedIndex = windowsRef.current.findIndex(w => w.name === frontmostName);
+        const frontmost = state.windows[state.active_index];
+        // Find this window in our unified (sorted) tab list by both name and bundle_id
+        const sortedIndex = windowsRef.current.findIndex(
+          w => w.name === frontmost?.name && w.bundle_id === frontmost?.bundle_id
+        );
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
           activeIndexRef.current = sortedIndex;
@@ -793,7 +789,7 @@ function App() {
     // Update order and save to Store (only on explicit reorder)
     const newOrder = newWindows.map(w => windowKey(w));
     tabOrderRef.current = newOrder;
-    saveTabOrder(null, newOrder);
+    saveTabOrder(newOrder);
 
     // Update activeIndex if needed
     let newActiveIndex = activeIndexRef.current;
@@ -820,7 +816,7 @@ function App() {
       } else {
         next[windowName] = colorId;
       }
-      saveTabColors(null, next);
+      saveTabColors(next);
       return next;
     });
   }, []);
@@ -1130,7 +1126,6 @@ function App() {
           if (app_type === "editor") {
             await fetchWindows();
             // Apply window offset to ALL editors
-            const ALL_EDITOR_BUNDLE_IDS = ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed"];
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(() => {});
             }
@@ -1142,7 +1137,6 @@ function App() {
 
           if (is_on_primary_screen) {
             // プライマリモニタの別アプリ → タブバーを非表示、全エディタのオフセット復元
-            const ALL_EDITOR_BUNDLE_IDS = ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed"];
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("restore_window_positions", { bundle_id: bid }).catch(() => {});
             }
