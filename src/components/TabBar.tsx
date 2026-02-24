@@ -106,7 +106,7 @@ function TabBar({ tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder
       <div style={styles.tabsWrapper}>
         {tabs.map((tab, index) => (
           <Tab
-            key={tab.name}
+            key={`${tab.bundle_id}:${tab.id}`}
             name={tab.name}
             isActive={index === activeIndex}
             isDragging={index === draggedIndex}

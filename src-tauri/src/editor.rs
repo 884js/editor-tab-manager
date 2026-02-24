@@ -19,6 +19,8 @@ pub struct EditorWindow {
     pub name: String,
     pub path: String,
     pub branch: Option<String>,  // Git branch name
+    pub bundle_id: String,       // Editor's macOS bundle ID
+    pub editor_name: String,     // Editor display name (e.g. "Visual Studio Code")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +103,8 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
             name,
             path: path_str,
             branch,
+            bundle_id: config.bundle_id.to_string(),
+            editor_name: config.display_name.to_string(),
         });
 
         if *is_frontmost {
@@ -162,9 +166,20 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
                 name,
                 path: path_str,
                 branch,
+                bundle_id: config.bundle_id.to_string(),
+                editor_name: config.display_name.to_string(),
             })
         })
         .collect()
+}
+
+/// Get windows from ALL running editors
+pub fn get_all_editor_windows() -> Vec<EditorWindow> {
+    let mut all_windows = Vec::new();
+    for editor in EDITORS {
+        all_windows.extend(get_editor_windows_with_config(editor));
+    }
+    all_windows
 }
 
 /// エディタIDからworkspaceStorageディレクトリのパスを返す

@@ -56,6 +56,11 @@ fn maximize_editor_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) 
     window_offset::maximize_window(bundle_id, window_id, tab_bar_height)
 }
 
+#[tauri::command]
+fn get_all_editor_windows() -> Vec<EditorWindow> {
+    editor::get_all_editor_windows()
+}
+
 #[tauri::command(rename_all = "snake_case")]
 fn is_editor_active() -> bool {
     editor::is_editor_active()
@@ -218,6 +223,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Editor commands with bundle_id support
             get_editor_windows,
+            get_all_editor_windows,
             get_editor_state,
             focus_editor_window,
             open_new_editor,

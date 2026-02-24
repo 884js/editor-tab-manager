@@ -23,6 +23,8 @@ export interface EditorWindow {
   name: string;
   path: string;
   branch?: string;
+  bundle_id: string;
+  editor_name: string;
 }
 
 export interface HistoryEntry {
@@ -60,13 +62,13 @@ async function getStore(): Promise<Store> {
   return storePromise;
 }
 
-// Get order key based on editor bundle ID
-function getOrderKey(bundleId: string | null): string {
-  return `order:${bundleId || "default"}`;
+// Unified order key (all editors share one tab order)
+function getOrderKey(_bundleId?: string | null): string {
+  return "order:unified";
 }
 
 // Load tab order from Store
-async function loadTabOrder(bundleId: string | null): Promise<string[]> {
+async function loadTabOrder(bundleId?: string | null): Promise<string[]> {
   try {
     const store = await getStore();
     const key = getOrderKey(bundleId);
@@ -78,7 +80,7 @@ async function loadTabOrder(bundleId: string | null): Promise<string[]> {
 }
 
 // Save tab order to Store
-async function saveTabOrder(bundleId: string | null, order: string[]): Promise<void> {
+async function saveTabOrder(bundleId: string | null | undefined, order: string[]): Promise<void> {
   try {
     const store = await getStore();
     const key = getOrderKey(bundleId);
@@ -88,13 +90,13 @@ async function saveTabOrder(bundleId: string | null, order: string[]): Promise<v
   }
 }
 
-// Get color key based on editor bundle ID
-function getColorKey(bundleId: string | null): string {
-  return `tabColor:${bundleId || "default"}`;
+// Unified color key (all editors share one color map)
+function getColorKey(_bundleId?: string | null): string {
+  return "tabColor:unified";
 }
 
 // Load tab colors from Store
-async function loadTabColors(bundleId: string | null): Promise<Record<string, string>> {
+async function loadTabColors(bundleId?: string | null): Promise<Record<string, string>> {
   try {
     const store = await getStore();
     const key = getColorKey(bundleId);
@@ -105,7 +107,7 @@ async function loadTabColors(bundleId: string | null): Promise<Record<string, st
 }
 
 // Save tab colors to Store
-async function saveTabColors(bundleId: string | null, colors: Record<string, string>): Promise<void> {
+async function saveTabColors(bundleId: string | null | undefined, colors: Record<string, string>): Promise<void> {
   try {
     const store = await getStore();
     const key = getColorKey(bundleId);
@@ -135,12 +137,17 @@ async function saveHistory(entries: HistoryEntry[]): Promise<void> {
   }
 }
 
+// Unique key for a window in the unified tab bar (handles same project name in different editors)
+function windowKey(w: EditorWindow): string {
+  return `${w.bundle_id}:${w.name}`;
+}
+
 // Sort windows by custom order, new windows go to the end
 function sortWindowsByOrder(windows: EditorWindow[], order: string[]): EditorWindow[] {
-  const orderMap = new Map(order.map((name, index) => [name, index]));
+  const orderMap = new Map(order.map((key, index) => [key, index]));
   return [...windows].sort((a, b) => {
-    const indexA = orderMap.get(a.name) ?? Infinity;
-    const indexB = orderMap.get(b.name) ?? Infinity;
+    const indexA = orderMap.get(windowKey(a)) ?? Infinity;
+    const indexB = orderMap.get(windowKey(b)) ?? Infinity;
     if (indexA === Infinity && indexB === Infinity) {
       // Both are new, sort alphabetically
       return a.name.localeCompare(b.name);
@@ -230,7 +237,6 @@ function App() {
   const historyRef = useRef<HistoryEntry[]>([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const showAddMenuRef = useRef(false);
-  const switchingEditorRef = useRef(false);
 
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(true);
   const notificationEnabledRef = useRef<boolean>(true);
@@ -278,8 +284,6 @@ function App() {
       const projectPath = event.payload.project_path;
       if (!projectPath) return;
       const projectName = projectPath.split("/").pop() || projectPath;
-      const bundleId = currentBundleIdRef.current;
-      if (!bundleId) return;
 
       // 1. タブバーを即座に表示
       const appWindow = getCurrentWindow();
@@ -302,16 +306,15 @@ function App() {
       }
 
       // 2. macOSの通知クリックによるアプリアクティベーション完了を待つ
-      //    通知クリックは送信元アプリ（タブマネージャ）をアクティベートするため、
-      //    その処理完了後にエディタをアクティベートする必要がある
       await new Promise(r => setTimeout(r, 500));
 
-      // 3. マッチするウィンドウがあればフォーカス、なければ最初のウィンドウをフォーカス
+      // 3. マッチするウィンドウがあればフォーカス（各ウィンドウのbundle_idを使用）
       const win = windowsRef.current.find(w => w.name === projectName);
       if (win) {
-        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id });
+        await invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
       } else if (windowsRef.current.length > 0) {
-        await invoke("focus_editor_window", { bundle_id: bundleId, window_id: windowsRef.current[0].id });
+        const first = windowsRef.current[0];
+        await invoke("focus_editor_window", { bundle_id: first.bundle_id, window_id: first.id });
       }
     }).then(u => { unlistenClick = u; });
 
@@ -391,6 +394,53 @@ function App() {
         console.error("Failed to check accessibility permission:", error);
       }
       setHasAccessibilityPermission(hasPermission);
+
+      // Migrate from per-editor store keys to unified keys
+      try {
+        const store = await getStore();
+        const hasUnifiedOrder = await store.get<string[]>("order:unified");
+        if (!hasUnifiedOrder) {
+          // Merge all existing per-editor order keys into unified
+          const keys = await store.keys();
+          const orderKeys = keys.filter((k) => k.startsWith("order:") && k !== "order:unified");
+          if (orderKeys.length > 0) {
+            const merged: string[] = [];
+            for (const key of orderKeys) {
+              const order = await store.get<string[]>(key);
+              if (order) {
+                // Old keys used plain names; add bundle_id prefix based on key
+                const bundleId = key.replace("order:", "");
+                for (const name of order) {
+                  const newKey = `${bundleId}:${name}`;
+                  if (!merged.includes(newKey)) {
+                    merged.push(newKey);
+                  }
+                }
+              }
+            }
+            if (merged.length > 0) {
+              await store.set("order:unified", merged);
+            }
+          }
+          // Merge tab colors similarly
+          const colorKeys = keys.filter((k) => k.startsWith("tabColor:") && k !== "tabColor:unified");
+          if (colorKeys.length > 0) {
+            const mergedColors: Record<string, string> = {};
+            for (const key of colorKeys) {
+              const colors = await store.get<Record<string, string>>(key);
+              if (colors) {
+                Object.assign(mergedColors, colors);
+              }
+            }
+            if (Object.keys(mergedColors).length > 0) {
+              await store.set("tabColor:unified", mergedColors);
+            }
+          }
+          await store.save();
+        }
+      } catch (error) {
+        console.error("Failed to migrate store keys:", error);
+      }
 
       // Check onboarding status
       try {
@@ -527,43 +577,34 @@ function App() {
 
   const refreshWindows = useCallback(async () => {
     try {
-      const bundleId = currentBundleIdRef.current;
-
       // Load order from store if not already loaded
       if (!orderLoadedRef.current) {
-        tabOrderRef.current = await loadTabOrder(bundleId);
+        tabOrderRef.current = await loadTabOrder();
         orderLoadedRef.current = true;
       }
 
-      const result = await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: bundleId });
+      const result = await invoke<EditorWindow[]>("get_all_editor_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
-      // Update order with current windows (remove deleted, keep order for existing)
-      // Only save if order actually changed to avoid unnecessary writes
-      const newOrder = sorted.map(w => w.name);
+      // Update order ref but don't save to store - only save on explicit reorder
+      const newOrder = sorted.map(w => windowKey(w));
       const orderChanged = newOrder.length !== tabOrderRef.current.length ||
-        newOrder.some((name, i) => tabOrderRef.current[i] !== name);
+        newOrder.some((key, i) => tabOrderRef.current[i] !== key);
       if (orderChanged) {
         tabOrderRef.current = newOrder;
-        // Don't save here - only save on explicit reorder
       }
 
       // Only update state if windows actually changed (prevents unnecessary re-renders)
       const currentWindows = windowsRef.current;
       const hasChanged = sorted.length !== currentWindows.length ||
-        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
+        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.bundle_id !== w.bundle_id || currentWindows[i]?.branch !== w.branch);
 
       if (hasChanged) {
-        // Detect disappeared windows for history (skip during editor switching)
-        if (!switchingEditorRef.current) {
-          const currentBundleId = currentBundleIdRef.current;
-          if (currentBundleId) {
-            const newNames = new Set(sorted.map(w => w.name));
-            const disappeared = currentWindows.filter(w => !newNames.has(w.name) && w.path);
-            if (disappeared.length > 0) {
-              addToHistory(disappeared, currentBundleId);
-            }
-          }
+        // Detect disappeared windows for history
+        const newKeys = new Set(sorted.map(w => windowKey(w)));
+        const disappeared = currentWindows.filter(w => !newKeys.has(windowKey(w)) && w.path);
+        if (disappeared.length > 0) {
+          addToHistory(disappeared);
         }
 
         setWindows(sorted);
@@ -585,19 +626,16 @@ function App() {
     }
 
     try {
-      const bundleId = currentBundleIdRef.current;
-      const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
+      // Get frontmost editor state (any editor)
+      const state = await invoke<EditorState>("get_editor_state", { bundle_id: null });
 
       // Sync activeIndex with frontmost editor window
       if (state.active_index !== null && state.windows.length > 0) {
-        const sorted = sortWindowsByOrder(state.windows, tabOrderRef.current);
         const frontmostName = state.windows[state.active_index]?.name;
-        const sortedIndex = sorted.findIndex(w => w.name === frontmostName);
+        // Find this window in our unified (sorted) tab list
+        const sortedIndex = windowsRef.current.findIndex(w => w.name === frontmostName);
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
-          // タブ切り替え → 旧タイマーキャンセル + 新アクティブタブの waiting チェック
-          // Note: setActiveIndex は非同期なので activeIndexRef はまだ旧値
-          // → activeIndexRef を先に更新してから syncWaitingTimer を呼ぶ
           activeIndexRef.current = sortedIndex;
           syncWaitingTimerRef.current();
         }
@@ -617,11 +655,6 @@ function App() {
     setActiveIndex(index);
     const window = windowsRef.current[index];
     if (window) {
-      const bundleId = currentBundleIdRef.current;
-      if (!bundleId) {
-        console.warn("No bundle_id available, cannot focus window");
-        return;
-      }
       // waiting バッジをクリア（タブクリックで「確認済み」とする）
       const waitingKey = Object.entries(claudeStatusesRef.current).find(
         ([path, status]) => status === "waiting" && path.split("/").pop() === window.name
@@ -646,8 +679,9 @@ function App() {
       }
       waitingTimersRef.current.clear();
 
-      invoke("focus_editor_window", { bundle_id: bundleId, window_id: window.id })
-        .then(() => invoke("maximize_editor_window", { bundle_id: bundleId, window_id: window.id, tab_bar_height: TAB_BAR_HEIGHT }))
+      // Use the window's own bundle_id for correct editor targeting
+      invoke("focus_editor_window", { bundle_id: window.bundle_id, window_id: window.id })
+        .then(() => invoke("maximize_editor_window", { bundle_id: window.bundle_id, window_id: window.id, tab_bar_height: TAB_BAR_HEIGHT }))
         .catch((error) => {
           console.error("Failed to focus/maximize window:", error);
         });
@@ -669,8 +703,7 @@ function App() {
   }, [refreshWindows]);
 
   // Add disappeared windows to history
-  const addToHistory = useCallback((disappeared: EditorWindow[], bundleId: string) => {
-    const editorName = EDITOR_DISPLAY_NAMES[bundleId] || bundleId;
+  const addToHistory = useCallback((disappeared: EditorWindow[]) => {
     const now = Date.now();
 
     setHistory((prev) => {
@@ -678,6 +711,9 @@ function App() {
 
       for (const win of disappeared) {
         if (!win.path) continue; // Skip windows without resolved path
+
+        const bundleId = win.bundle_id;
+        const editorName = EDITOR_DISPLAY_NAMES[bundleId] || win.editor_name || bundleId;
 
         // Remove existing entry with same name + bundleId (will re-add at front)
         updated = updated.filter(
@@ -734,12 +770,7 @@ function App() {
       if (!ok) return;
 
       try {
-        const bundleId = currentBundleIdRef.current;
-        if (!bundleId) {
-          console.warn("No bundle_id available, cannot close window");
-          return;
-        }
-        await invoke("close_editor_window", { bundle_id: bundleId, window_id: win.id });
+        await invoke("close_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
         setTimeout(refreshWindows, 500);
       } catch (error) {
         console.error("Failed to close window:", error);
@@ -760,9 +791,9 @@ function App() {
     newWindows.splice(toIndex, 0, moved);
 
     // Update order and save to Store (only on explicit reorder)
-    const newOrder = newWindows.map(w => w.name);
+    const newOrder = newWindows.map(w => windowKey(w));
     tabOrderRef.current = newOrder;
-    saveTabOrder(currentBundleIdRef.current, newOrder);
+    saveTabOrder(null, newOrder);
 
     // Update activeIndex if needed
     let newActiveIndex = activeIndexRef.current;
@@ -789,7 +820,7 @@ function App() {
       } else {
         next[windowName] = colorId;
       }
-      saveTabColors(currentBundleIdRef.current, next);
+      saveTabColors(null, next);
       return next;
     });
   }, []);
@@ -847,10 +878,9 @@ function App() {
       const unlistenClose = await listen("close-current-tab", () => {
         if (isMounted) {
           const currentIndex = activeIndexRef.current;
-          const currentWindows = windowsRef.current;
-          const bundleId = currentBundleIdRef.current;
-          if (currentWindows[currentIndex] && bundleId) {
-            invoke("close_editor_window", { bundle_id: bundleId, window_id: currentWindows[currentIndex].id });
+          const win = windowsRef.current[currentIndex];
+          if (win) {
+            invoke("close_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
             setTimeout(() => refreshWindowsRef.current(), 500);
           }
         }
@@ -863,10 +893,9 @@ function App() {
           activeIndexRef.current = event.payload;
           syncWaitingTimerRef.current();
           const win = windowsRef.current[event.payload];
-          const bundleId = currentBundleIdRef.current;
-          if (win && bundleId) {
-            invoke("focus_editor_window", { bundle_id: bundleId, window_id: win.id })
-              .then(() => invoke("maximize_editor_window", { bundle_id: bundleId, window_id: win.id, tab_bar_height: TAB_BAR_HEIGHT }));
+          if (win) {
+            invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id })
+              .then(() => invoke("maximize_editor_window", { bundle_id: win.bundle_id, window_id: win.id, tab_bar_height: TAB_BAR_HEIGHT }));
           }
         }
       });
@@ -976,38 +1005,30 @@ function App() {
     };
   }, []); // Empty dependency array - listeners set up once
 
-  // Fetch windows only (without visibility check) - used when editor is active
-  const fetchWindows = useCallback(async (bundleId?: string | null) => {
+  // Fetch windows from all editors (unified tab bar)
+  const fetchWindows = useCallback(async () => {
     try {
-      const targetBundleId = bundleId ?? currentBundleIdRef.current;
-      const isSwitchingEditor = !!(bundleId && bundleId !== currentBundleIdRef.current);
-
-      // Set flag to prevent false history entries during editor switch
-      if (isSwitchingEditor) {
-        switchingEditorRef.current = true;
-      }
-
-      // Load order and colors from store if bundle changed or not loaded yet
-      if (!orderLoadedRef.current || isSwitchingEditor) {
+      // Load order and colors from store if not loaded yet
+      if (!orderLoadedRef.current) {
         const [order, colors] = await Promise.all([
-          loadTabOrder(targetBundleId),
-          loadTabColors(targetBundleId),
+          loadTabOrder(),
+          loadTabColors(),
         ]);
         tabOrderRef.current = order;
         setTabColors(colors);
         orderLoadedRef.current = true;
       }
 
-      const result = await invoke<EditorWindow[]>("get_editor_windows", { bundle_id: targetBundleId });
+      const result = await invoke<EditorWindow[]>("get_all_editor_windows");
       // Sort by custom order
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       // Update order ref but don't save to store - only save on explicit reorder
-      tabOrderRef.current = sorted.map(w => w.name);
+      tabOrderRef.current = sorted.map(w => windowKey(w));
 
       // Update windows only if changed
       const currentWindows = windowsRef.current;
       const hasChanged = sorted.length !== currentWindows.length ||
-        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.branch !== w.branch);
+        sorted.some((w, i) => currentWindows[i]?.name !== w.name || currentWindows[i]?.bundle_id !== w.bundle_id || currentWindows[i]?.branch !== w.branch);
 
       if (hasChanged) {
         setWindows(sorted);
@@ -1017,17 +1038,11 @@ function App() {
       }
 
       // Record current windows to history (so open tabs are also in history)
-      if (sorted.length > 0 && targetBundleId) {
-        addToHistory(sorted, targetBundleId);
-      }
-
-      // Reset switching flag after windows are updated
-      if (isSwitchingEditor) {
-        switchingEditorRef.current = false;
+      if (sorted.length > 0) {
+        addToHistory(sorted);
       }
     } catch (error) {
       console.error("Failed to fetch windows:", error);
-      switchingEditorRef.current = false;
     }
   }, [addToHistory]);
 
@@ -1104,33 +1119,20 @@ function App() {
 
         if (app_type === "editor" || app_type === "tab_manager") {
           // Editor or our app is active - show the tab bar
-          // Tab Manager active = user is operating the tab bar, so keep it visible
           isEditorActiveRef.current = app_type === "editor";
           isTabManagerActiveRef.current = app_type === "tab_manager";
           if (app_type === "editor" && bundle_id) {
-            // Reload order from store if bundle changed
-            if (bundle_id !== currentBundleIdRef.current) {
-              // Restore window positions for the previous editor before switching
-              if (currentBundleIdRef.current) {
-                invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
-                  console.error("Failed to restore window positions for previous editor:", error);
-                });
-              }
-              orderLoadedRef.current = false;
-            }
-            // Update current bundle ID when editor becomes active
             currentBundleIdRef.current = bundle_id;
           }
           await appWindow.show();
           isVisibleRef.current = true;
-          // Fetch windows immediately when editor becomes active
+          // Fetch all editor windows (unified tab bar)
           if (app_type === "editor") {
-            await fetchWindows(bundle_id);
-            // Apply window offset to prevent editor UI from being hidden behind tab bar
-            if (bundle_id) {
-              invoke("apply_window_offset", { bundle_id, offset_y: TAB_BAR_HEIGHT }).catch((error) => {
-                console.error("Failed to apply window offset:", error);
-              });
+            await fetchWindows();
+            // Apply window offset to ALL editors
+            const ALL_EDITOR_BUNDLE_IDS = ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed"];
+            for (const bid of ALL_EDITOR_BUNDLE_IDS) {
+              invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(() => {});
             }
           }
         } else {
@@ -1139,11 +1141,10 @@ function App() {
           isTabManagerActiveRef.current = false;
 
           if (is_on_primary_screen) {
-            // プライマリモニタの別アプリ → タブバーを非表示、オフセット復元
-            if (currentBundleIdRef.current) {
-              invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
-                console.error("Failed to restore window positions:", error);
-              });
+            // プライマリモニタの別アプリ → タブバーを非表示、全エディタのオフセット復元
+            const ALL_EDITOR_BUNDLE_IDS = ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed"];
+            for (const bid of ALL_EDITOR_BUNDLE_IDS) {
+              invoke("restore_window_positions", { bundle_id: bid }).catch(() => {});
             }
             if (isVisibleRef.current) {
               await appWindow.hide();
