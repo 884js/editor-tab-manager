@@ -151,7 +151,7 @@ pub fn init(app_handle: AppHandle) {
 }
 
 /// Register AX observer for an editor process.
-/// Unregisters all other editors' observers first so only the active editor fires events.
+#[allow(dead_code)]
 pub fn register_for_editor(bundle_id: &str) {
     // Find the running editor process
     let workspace = NSWorkspace::sharedWorkspace();
@@ -161,10 +161,31 @@ pub fn register_for_editor(bundle_id: &str) {
         if let Some(bid) = app.bundleIdentifier() {
             if bid.to_string() == bundle_id {
                 let pid = app.processIdentifier();
-                // Unregister all other observers before registering the new one
-                unregister_all_except(pid);
                 register_for_pid(pid);
                 break;
+            }
+        }
+    }
+}
+
+/// Register AX observers for ALL running supported editors.
+/// Skips editors that are already registered (cheap check before full registration).
+pub fn register_all_editors() {
+    let already_registered = {
+        let state = AX_STATE.lock().unwrap();
+        state.observers.keys().copied().collect::<std::collections::HashSet<_>>()
+    };
+
+    let workspace = NSWorkspace::sharedWorkspace();
+    let apps = workspace.runningApplications();
+
+    for app in apps {
+        if let Some(bid) = app.bundleIdentifier() {
+            if is_supported_editor(&bid.to_string()) {
+                let pid = app.processIdentifier();
+                if !already_registered.contains(&pid) {
+                    register_for_pid(pid);
+                }
             }
         }
     }
@@ -237,21 +258,6 @@ fn register_for_pid(pid: i32) {
                 pid,
             },
         );
-    }
-}
-
-/// Unregister all observers except the given PID
-fn unregister_all_except(keep_pid: i32) {
-    let mut state = AX_STATE.lock().unwrap();
-    let pids_to_remove: Vec<i32> = state
-        .observers
-        .keys()
-        .filter(|&&pid| pid != keep_pid)
-        .copied()
-        .collect();
-    for pid in pids_to_remove {
-        // Drop will clean up resources
-        state.observers.remove(&pid);
     }
 }
 

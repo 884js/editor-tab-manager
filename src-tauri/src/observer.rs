@@ -128,7 +128,7 @@ pub fn start_observer(app_handle: AppHandle) {
                 // Editor is active → cancel pending "other" and emit immediately
                 cancel_pending_other_event();
                 notification::remove_all_delivered_notifications();
-                ax_observer::register_for_editor(bundle_id_str.as_deref().unwrap_or_default());
+                ax_observer::register_all_editors();
                 let payload = AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
