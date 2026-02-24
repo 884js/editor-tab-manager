@@ -150,7 +150,8 @@ pub fn init(app_handle: AppHandle) {
     state.app_handle = Some(app_handle);
 }
 
-/// Register AX observer for an editor process
+/// Register AX observer for an editor process.
+/// Unregisters all other editors' observers first so only the active editor fires events.
 pub fn register_for_editor(bundle_id: &str) {
     // Find the running editor process
     let workspace = NSWorkspace::sharedWorkspace();
@@ -160,6 +161,8 @@ pub fn register_for_editor(bundle_id: &str) {
         if let Some(bid) = app.bundleIdentifier() {
             if bid.to_string() == bundle_id {
                 let pid = app.processIdentifier();
+                // Unregister all other observers before registering the new one
+                unregister_all_except(pid);
                 register_for_pid(pid);
                 break;
             }
@@ -234,6 +237,21 @@ fn register_for_pid(pid: i32) {
                 pid,
             },
         );
+    }
+}
+
+/// Unregister all observers except the given PID
+fn unregister_all_except(keep_pid: i32) {
+    let mut state = AX_STATE.lock().unwrap();
+    let pids_to_remove: Vec<i32> = state
+        .observers
+        .keys()
+        .filter(|&&pid| pid != keep_pid)
+        .copied()
+        .collect();
+    for pid in pids_to_remove {
+        // Drop will clean up resources
+        state.observers.remove(&pid);
     }
 }
 

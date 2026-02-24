@@ -874,24 +874,22 @@ function App() {
 
       // Listen for window-focus-changed event from AXObserver (Rust backend)
       const unlistenWindowFocus = await listen("window-focus-changed", async () => {
-        if (isMounted) {
-          syncActiveTabRef.current();
-          // Fallback: AXFocusedWindowChanged means an editor is active,
-          // so show the tab bar if it's currently hidden
-          if (!isVisibleRef.current) {
-            const appWindow = getCurrentWindow();
-            await appWindow.show();
-            isVisibleRef.current = true;
-          }
+        if (!isMounted || !isEditorActiveRef.current) return;
+        syncActiveTabRef.current();
+        // Fallback: AXFocusedWindowChanged means an editor is active,
+        // so show the tab bar if it's currently hidden
+        if (!isVisibleRef.current) {
+          const appWindow = getCurrentWindow();
+          await appWindow.show();
+          isVisibleRef.current = true;
         }
       });
       cleanupFns.push(unlistenWindowFocus);
 
       // Listen for windows-changed event (window created/destroyed)
       const unlistenWindowsChanged = await listen("windows-changed", () => {
-        if (isMounted) {
-          refreshWindowsRef.current();
-        }
+        if (!isMounted || !isEditorActiveRef.current) return;
+        refreshWindowsRef.current();
       });
       cleanupFns.push(unlistenWindowsChanged);
 
@@ -1112,6 +1110,12 @@ function App() {
           if (app_type === "editor" && bundle_id) {
             // Reload order from store if bundle changed
             if (bundle_id !== currentBundleIdRef.current) {
+              // Restore window positions for the previous editor before switching
+              if (currentBundleIdRef.current) {
+                invoke("restore_window_positions", { bundle_id: currentBundleIdRef.current }).catch((error) => {
+                  console.error("Failed to restore window positions for previous editor:", error);
+                });
+              }
               orderLoadedRef.current = false;
             }
             // Update current bundle ID when editor becomes active
