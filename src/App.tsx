@@ -873,9 +873,16 @@ function App() {
       cleanupFns.push(unlistenSwitch);
 
       // Listen for window-focus-changed event from AXObserver (Rust backend)
-      const unlistenWindowFocus = await listen("window-focus-changed", () => {
+      const unlistenWindowFocus = await listen("window-focus-changed", async () => {
         if (isMounted) {
           syncActiveTabRef.current();
+          // Fallback: AXFocusedWindowChanged means an editor is active,
+          // so show the tab bar if it's currently hidden
+          if (!isVisibleRef.current) {
+            const appWindow = getCurrentWindow();
+            await appWindow.show();
+            isVisibleRef.current = true;
+          }
         }
       });
       cleanupFns.push(unlistenWindowFocus);
@@ -1110,10 +1117,8 @@ function App() {
             // Update current bundle ID when editor becomes active
             currentBundleIdRef.current = bundle_id;
           }
-          if (!isVisibleRef.current) {
-            await appWindow.show();
-            isVisibleRef.current = true;
-          }
+          await appWindow.show();
+          isVisibleRef.current = true;
           // Fetch windows immediately when editor becomes active
           if (app_type === "editor") {
             await fetchWindows(bundle_id);
