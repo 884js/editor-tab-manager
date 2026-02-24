@@ -26,7 +26,7 @@ function formatRelativeTime(timestamp: number, t: (key: string, options?: Record
 
 function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onClearHistory, onClose, anchorRef }: AddTabMenuProps) {
   const { t } = useTranslation();
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Filter out currently open tabs from history
@@ -37,9 +37,25 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
   useEffect(() => {
     if (anchorRef.current) {
       const rect = anchorRef.current.getBoundingClientRect();
+      const MENU_WIDTH = 280;
+      const VIEWPORT_PADDING = 4;
+
+      // デフォルト: ボタンの右端にメニューの右端を揃える
+      let left = rect.right - MENU_WIDTH;
+
+      // 左端がviewport外に出ないようクランプ
+      if (left < VIEWPORT_PADDING) {
+        left = VIEWPORT_PADDING;
+      }
+
+      // 右端がviewport外に出ないようクランプ
+      if (left + MENU_WIDTH > window.innerWidth - VIEWPORT_PADDING) {
+        left = window.innerWidth - MENU_WIDTH - VIEWPORT_PADDING;
+      }
+
       setMenuPos({
         top: rect.bottom + 4,
-        right: window.innerWidth - rect.right,
+        left,
       });
     }
   }, [anchorRef]);
@@ -61,7 +77,7 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
         ref={menuRef}
         style={{
           ...styles.container,
-          ...(menuPos ? { top: menuPos.top, right: menuPos.right } : { top: 40, right: 8 }),
+          ...(menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 40, left: 8 }),
         }}
       >
         {/* New Window */}
