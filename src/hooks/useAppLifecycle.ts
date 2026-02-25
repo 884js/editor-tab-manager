@@ -391,6 +391,7 @@ export function useAppLifecycle({
           isVisibleRef.current = true;
           if (app_type === "editor") {
             await fetchWindowsRef.current();
+            setTimeout(() => syncActiveTabRef.current(), 50);
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(
                 () => {}

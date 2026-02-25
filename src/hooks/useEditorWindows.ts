@@ -124,12 +124,13 @@ export function useEditorWindows({
     }
 
     try {
-      const state = await invoke<EditorState>("get_editor_state", { bundle_id: null });
+      const bundleId = currentBundleIdRef.current ?? null;
+      const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
 
       if (state.active_index !== null && state.windows.length > 0) {
         const frontmost = state.windows[state.active_index];
         const sortedIndex = windowsRef.current.findIndex(
-          (w) => w.name === frontmost?.name && w.bundle_id === frontmost?.bundle_id
+          (w) => w.id === frontmost?.id
         );
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);

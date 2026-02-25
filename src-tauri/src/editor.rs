@@ -30,16 +30,35 @@ pub struct EditorState {
     pub active_index: Option<usize>,
 }
 
-/// Get editor state for any running editor (tries each editor in order)
+/// Get editor state for any running editor
+/// Prioritizes the frontmost editor application
 pub fn get_any_editor_state() -> EditorState {
+    let editor_bundle_ids: Vec<&str> = EDITORS.iter().map(|e| e.bundle_id).collect();
+
+    // 最前面のエディタを特定
+    if let Some(frontmost_bid) = ax_helper::get_frontmost_editor_bundle_id(&editor_bundle_ids) {
+        if let Some(config) = crate::editor_config::get_editor_by_bundle_id(&frontmost_bid) {
+            let state = get_editor_state_with_config(config);
+            if !state.windows.is_empty() {
+                return state;
+            }
+        }
+    }
+
+    // フォールバック: 最前面がエディタでない場合（Tab Managerやその他アプリ）
+    // ウィンドウを持つ最初のエディタを返す
     for editor in EDITORS {
         let state = get_editor_state_with_config(editor);
-        if !state.windows.is_empty() || state.is_active {
+        if !state.windows.is_empty() {
             return state;
         }
     }
-    // Default to first editor (VSCode) if none running
-    get_editor_state_with_config(&EDITORS[0])
+
+    EditorState {
+        is_active: false,
+        windows: vec![],
+        active_index: None,
+    }
 }
 
 /// Get windows from any running editor (tries each editor in order)
