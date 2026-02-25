@@ -1,16 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { load } from "@tauri-apps/plugin-store";
-import type { Store } from "@tauri-apps/plugin-store";
-
-let storePromise: Promise<Store> | null = null;
-
-function getStore(): Promise<Store> {
-  if (!storePromise) {
-    storePromise = load("tab-order.json");
-  }
-  return storePromise;
-}
+import { getStore } from "../utils/store";
 
 export function useLanguage() {
   const { i18n } = useTranslation();

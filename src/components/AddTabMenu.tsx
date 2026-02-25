@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import type { EditorWindow, HistoryEntry } from "../App";
+import type { EditorWindow, HistoryEntry } from "../types/editor";
 
 interface AddTabMenuProps {
   entries: HistoryEntry[];

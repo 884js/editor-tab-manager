@@ -1,6 +1,6 @@
 import { useState, memo } from "react";
 import { useTranslation } from "react-i18next";
-import type { ClaudeStatus } from "../App";
+import type { ClaudeStatus } from "../types/editor";
 import { getColorById } from "../constants/tabColors";
 
 const blend = (base: number, color: number, ratio: number) =>

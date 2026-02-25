@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
-import type { EditorWindow, ClaudeStatus, HistoryEntry } from "../App";
+import type { EditorWindow, ClaudeStatus, HistoryEntry } from "../types/editor";
 
 interface TabBarProps {
   tabs: EditorWindow[];
