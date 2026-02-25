@@ -111,44 +111,54 @@ export function useClaudeStatus({
 
   // notification-clicked listener
   useEffect(() => {
+    let isMounted = true;
     let unlistenClick: (() => void) | null = null;
-    listen<{ project_path: string }>("notification-clicked", async (event) => {
-      const projectPath = event.payload.project_path;
-      if (!projectPath) return;
-      const projectName = projectPath.split("/").pop() || projectPath;
 
-      const appWindow = getCurrentWindow();
-      await appWindow.show();
-      isVisibleRef.current = true;
+    const setupListener = async () => {
+      const unlisten = await listen<{ project_path: string }>("notification-clicked", async (event) => {
+        if (!isMounted) return;
+        const projectPath = event.payload.project_path;
+        if (!projectPath) return;
+        const projectName = projectPath.split("/").pop() || projectPath;
 
-      if (claudeStatusesRef.current[projectPath] === "waiting") {
-        dismissedWaitingRef.current.add(projectPath);
-        setClaudeStatuses((prev) => {
-          const next = { ...prev };
-          delete next[projectPath];
-          return next;
-        });
-        const timer = waitingTimersRef.current.get(projectPath);
-        if (timer) {
-          clearTimeout(timer);
-          waitingTimersRef.current.delete(projectPath);
+        const appWindow = getCurrentWindow();
+        await appWindow.show();
+        isVisibleRef.current = true;
+
+        if (claudeStatusesRef.current[projectPath] === "waiting") {
+          dismissedWaitingRef.current.add(projectPath);
+          setClaudeStatuses((prev) => {
+            const next = { ...prev };
+            delete next[projectPath];
+            return next;
+          });
+          const timer = waitingTimersRef.current.get(projectPath);
+          if (timer) {
+            clearTimeout(timer);
+            waitingTimersRef.current.delete(projectPath);
+          }
         }
-      }
 
-      await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 500));
 
-      const win = windowsRef.current.find((w) => w.name === projectName);
-      if (win) {
-        await invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
-      } else if (windowsRef.current.length > 0) {
-        const first = windowsRef.current[0];
-        await invoke("focus_editor_window", { bundle_id: first.bundle_id, window_id: first.id });
+        const win = windowsRef.current.find((w) => w.name === projectName);
+        if (win) {
+          await invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
+        } else if (windowsRef.current.length > 0) {
+          const first = windowsRef.current[0];
+          await invoke("focus_editor_window", { bundle_id: first.bundle_id, window_id: first.id });
+        }
+      });
+      if (isMounted) {
+        unlistenClick = unlisten;
+      } else {
+        unlisten();
       }
-    }).then((u) => {
-      unlistenClick = u;
-    });
+    };
+    setupListener();
 
     return () => {
+      isMounted = false;
       unlistenClick?.();
     };
   }, [windowsRef, isVisibleRef]);
@@ -193,7 +203,7 @@ export function useClaudeStatus({
         }
       }
 
-      claudeStatusesRef.current = newStatuses;
+      claudeStatusesRef.current = filtered;
       syncWaitingTimerRef.current();
 
       const resetPaths = Object.keys(filtered).filter(

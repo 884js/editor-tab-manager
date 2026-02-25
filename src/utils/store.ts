@@ -8,7 +8,7 @@ let storePromise: Promise<Store> | null = null;
 export async function getStore(): Promise<Store> {
   if (!storePromise) {
     storePromise = load("tab-order.json").catch((e) => {
-      storePromise = null; // リセットしてリトライ可能に
+      storePromise = null; // Reset so retry is possible
       throw e;
     });
   }

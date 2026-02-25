@@ -10,9 +10,6 @@ import { useHistory } from "./hooks/useHistory";
 import { useEditorWindows } from "./hooks/useEditorWindows";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 
-// Re-export for backward compatibility
-export type { EditorWindow, HistoryEntry, ClaudeStatus } from "./types/editor";
-
 function App() {
   const { t } = useTranslation();
 

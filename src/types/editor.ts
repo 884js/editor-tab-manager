@@ -1,4 +1,4 @@
-// タブバーの高さ（px）
+// Tab bar height (px)
 export const TAB_BAR_HEIGHT = 36;
 
 export interface EditorWindow {
@@ -41,7 +41,7 @@ export interface AppActivationPayload {
   is_on_primary_screen: boolean;
 }
 
-// Claude Code の状態
+// Claude Code status
 export type ClaudeStatus = "waiting" | "generating";
 
 // Payload from claude-status event

@@ -92,7 +92,7 @@ export function useAppLifecycle({
       }
     };
     init();
-  }, [notificationEnabledRef]);
+  }, []);
 
   // Initialize autostart state
   useEffect(() => {
