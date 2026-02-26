@@ -101,6 +101,11 @@ export function useEditorWindows({
         );
 
       if (hasChanged) {
+        // Skip clearing windows on transient AX API empty response
+        if (sorted.length === 0 && currentWindows.length > 0) {
+          return;
+        }
+
         const newKeys = new Set(sorted.map((w) => windowKey(w)));
         const disappeared = currentWindows.filter(
           (w) => !newKeys.has(windowKey(w)) && w.path
@@ -275,6 +280,10 @@ export function useEditorWindows({
         );
 
       if (hasChanged) {
+        // Skip clearing windows on transient AX API empty response
+        if (sorted.length === 0 && currentWindows.length > 0) {
+          return 0;
+        }
         setWindows(sorted);
         if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
           setActiveIndex(sorted.length - 1);
