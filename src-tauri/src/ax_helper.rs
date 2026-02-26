@@ -188,6 +188,21 @@ fn activate_app_by_pid(pid: i32) -> Result<(), String> {
     Err(format!("Could not find application with PID {}", pid))
 }
 
+/// Get the bundle ID of the frontmost application if it's a supported editor
+pub fn get_frontmost_editor_bundle_id(editor_bundle_ids: &[&str]) -> Option<String> {
+    let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
+    let frontmost = workspace.frontmostApplication()?;
+    let bundle_id = frontmost.bundleIdentifier()?;
+    let bundle_str = bundle_id.to_string();
+
+    for editor_bundle in editor_bundle_ids {
+        if bundle_str == *editor_bundle {
+            return Some(bundle_str);
+        }
+    }
+    None
+}
+
 /// Check if any supported editor or the Tab Manager is the frontmost application
 pub fn is_editor_frontmost(editor_bundle_ids: &[&str]) -> bool {
     let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
@@ -243,13 +258,10 @@ fn send_keyboard_shortcut(key: &str, cmd: bool, shift: bool) -> Result<(), Strin
     Ok(())
 }
 
-/// Compare two AXUIElements for equality by comparing their window titles
+/// Compare two AXUIElements for equality by comparing their CGWindowID
 fn windows_equal(a: &AXUIElement, b: &AXUIElement) -> bool {
-    let title_a = a.title();
-    let title_b = b.title();
-
-    match (title_a, title_b) {
-        (Ok(ta), Ok(tb)) => ta == tb,
+    match (get_window_id(a), get_window_id(b)) {
+        (Some(id_a), Some(id_b)) => id_a == id_b,
         _ => false,
     }
 }

@@ -17,7 +17,7 @@ type ListenHandler = (event: { payload: unknown }) => void;
 
 function makeParams() {
   return {
-    fetchWindowsRef: { current: vi.fn().mockResolvedValue(undefined) },
+    fetchWindowsRef: { current: vi.fn().mockResolvedValue(1) },
     syncActiveTabRef: { current: vi.fn().mockResolvedValue(undefined) },
     showAddMenuRef: { current: false },
     setShowAddMenu: vi.fn(),
@@ -355,7 +355,7 @@ describe("useAppLifecycle", () => {
       });
 
       expect(params.isEditorActiveRef.current).toBe(false);
-      expect(appWindow.hide).toHaveBeenCalled();
+      expect(appWindow.setPosition).toHaveBeenCalled();
     });
   });
 });

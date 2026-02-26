@@ -2,15 +2,8 @@ import { load } from "@tauri-apps/plugin-store";
 import { createMockStore } from "../test/setup";
 import type { EditorWindow } from "../types/editor";
 import {
-  getStore,
   windowKey,
   sortWindowsByOrder,
-  loadTabOrder,
-  saveTabOrder,
-  loadTabColors,
-  saveTabColors,
-  loadHistory,
-  saveHistory,
   UNIFIED_ORDER_KEY,
   UNIFIED_COLOR_KEY,
 } from "./store";

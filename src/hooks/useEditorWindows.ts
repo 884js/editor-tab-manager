@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, useRef, type MutableRefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
-import { TAB_BAR_HEIGHT } from "../types/editor";
+import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
 import type { EditorWindow, EditorState } from "../types/editor";
 import {
   loadTabOrder,
@@ -21,6 +21,7 @@ interface UseEditorWindowsParams {
   addToHistory: (windows: EditorWindow[]) => void;
   currentBundleIdRef: MutableRefObject<string | null>;
   isEditorActiveRef: MutableRefObject<boolean>;
+  isTabManagerActiveRef: MutableRefObject<boolean>;
   isVisibleRef: MutableRefObject<boolean>;
   t: TFunction;
 }
@@ -33,8 +34,8 @@ interface UseEditorWindowsReturn {
   activeIndexRef: MutableRefObject<number>;
   refreshWindows: () => Promise<void>;
   refreshWindowsRef: MutableRefObject<() => Promise<void>>;
-  fetchWindows: () => Promise<void>;
-  fetchWindowsRef: MutableRefObject<() => Promise<void>>;
+  fetchWindows: () => Promise<number>;
+  fetchWindowsRef: MutableRefObject<() => Promise<number>>;
   syncActiveTab: () => Promise<void>;
   syncActiveTabRef: MutableRefObject<() => Promise<void>>;
   handleTabClick: (index: number) => void;
@@ -50,6 +51,7 @@ export function useEditorWindows({
   addToHistory,
   currentBundleIdRef,
   isEditorActiveRef,
+  isTabManagerActiveRef,
   isVisibleRef,
   t,
 }: UseEditorWindowsParams): UseEditorWindowsReturn {
@@ -99,6 +101,11 @@ export function useEditorWindows({
         );
 
       if (hasChanged) {
+        // Skip clearing windows on transient AX API empty response
+        if (sorted.length === 0 && currentWindows.length > 0) {
+          return;
+        }
+
         const newKeys = new Set(sorted.map((w) => windowKey(w)));
         const disappeared = currentWindows.filter(
           (w) => !newKeys.has(windowKey(w)) && w.path
@@ -124,12 +131,13 @@ export function useEditorWindows({
     }
 
     try {
-      const state = await invoke<EditorState>("get_editor_state", { bundle_id: null });
+      const bundleId = currentBundleIdRef.current ?? null;
+      const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
 
       if (state.active_index !== null && state.windows.length > 0) {
         const frontmost = state.windows[state.active_index];
         const sortedIndex = windowsRef.current.findIndex(
-          (w) => w.name === frontmost?.name && w.bundle_id === frontmost?.bundle_id
+          (w) => w.id === frontmost?.id
         );
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
@@ -248,7 +256,7 @@ export function useEditorWindows({
     });
   }, []);
 
-  const fetchWindows = useCallback(async () => {
+  const fetchWindows = useCallback(async (): Promise<number> => {
     try {
       if (!orderLoadedRef.current) {
         const [order, colors] = await Promise.all([loadTabOrder(), loadTabColors()]);
@@ -272,6 +280,10 @@ export function useEditorWindows({
         );
 
       if (hasChanged) {
+        // Skip clearing windows on transient AX API empty response
+        if (sorted.length === 0 && currentWindows.length > 0) {
+          return 0;
+        }
         setWindows(sorted);
         if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
           setActiveIndex(sorted.length - 1);
@@ -281,8 +293,11 @@ export function useEditorWindows({
       if (sorted.length > 0) {
         addToHistory(sorted);
       }
+
+      return sorted.length;
     } catch (error) {
       console.error("Failed to fetch windows:", error);
+      return 0;
     }
   }, [addToHistory]);
 
@@ -364,11 +379,29 @@ export function useEditorWindows({
       cleanupFns.push(unlistenSwitch);
 
       const unlistenWindowFocus = await listen("window-focus-changed", async () => {
-        if (!isMounted || !isEditorActiveRef.current) return;
+        if (!isMounted) return;
+
+        // Approach 6: AX Observer only monitors editor processes, so this event
+        // confirms an editor is active. If isEditorActiveRef is false, recover
+        // the editor-active state as a fallback for missed observer.rs events.
+        if (!isEditorActiveRef.current) {
+          isEditorActiveRef.current = true;
+          isTabManagerActiveRef.current = false;
+        }
+
         syncActiveTabRef.current();
+
+        // Approach 4: Position-based visibility recovery
         if (!isVisibleRef.current) {
           const appWindow = getCurrentWindow();
-          await appWindow.show();
+          await appWindow.setPosition(new PhysicalPosition(0, 0));
+          isVisibleRef.current = true;
+          for (const bid of ALL_EDITOR_BUNDLE_IDS) {
+            invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(
+              () => {}
+            );
+          }
+          await fetchWindowsRef.current();
         }
       });
       cleanupFns.push(unlistenWindowFocus);
@@ -386,7 +419,7 @@ export function useEditorWindows({
       isMounted = false;
       cleanupFns.forEach((fn) => fn());
     };
-  }, [syncWaitingTimer, isEditorActiveRef, isVisibleRef]);
+  }, [syncWaitingTimer, isEditorActiveRef, isTabManagerActiveRef, isVisibleRef]);
 
   return {
     windows,
