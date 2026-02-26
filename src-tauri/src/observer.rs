@@ -4,7 +4,7 @@ use crate::notification;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSRunningApplication, NSScreen, NSWorkspace};
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSNotificationName, NSOperationQueue,
+    NSNotification, NSNotificationCenter, NSNotificationName, NSOperationQueue, NSString,
 };
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -55,8 +55,9 @@ fn is_focused_on_primary_screen() -> bool {
     origin.x.abs() < 1.0 && origin.y.abs() < 1.0
 }
 
-/// Cancel any pending "other" event by incrementing the version
-fn cancel_pending_other_event() {
+/// Cancel any pending "other" event by incrementing the debounce version.
+/// Called from ax_observer when editor activation is confirmed via AX events.
+pub fn cancel_pending_other_event() {
     DEBOUNCE_VERSION.fetch_add(1, Ordering::SeqCst);
 }
 
@@ -74,6 +75,26 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
 
         let app_handle_main = Arc::clone(&app_handle_for_thread);
         let _ = app_handle_for_thread.run_on_main_thread(move || {
+            // Approach 3: Re-check frontmostApplication after debounce.
+            // The app may have changed during the delay (e.g., editor became active).
+            let workspace = NSWorkspace::sharedWorkspace();
+            if let Some(frontmost) = workspace.frontmostApplication() {
+                if is_target_app(&frontmost) {
+                    let bid = frontmost.bundleIdentifier().map(|s| s.to_string());
+                    notification::remove_all_delivered_notifications();
+                    ax_observer::register_all_editors();
+                    let payload = AppActivationPayload {
+                        app_type: "editor".to_string(),
+                        bundle_id: bid,
+                        is_on_primary_screen: true,
+                    };
+                    if let Some(window) = app_handle_main.get_webview_window("main") {
+                        let _ = window.emit("app-activated", payload);
+                    }
+                    return;
+                }
+            }
+
             let payload = AppActivationPayload {
                 app_type: "other".to_string(),
                 bundle_id,
@@ -104,16 +125,41 @@ pub fn start_observer(app_handle: AppHandle) {
 
         let app_handle_clone = Arc::clone(&app_handle);
 
-        let block = block2::RcBlock::new(move |_notification: NonNull<NSNotification>| {
-            // Use frontmostApplication() instead of userInfo for Hardened Runtime compatibility
-            let workspace = NSWorkspace::sharedWorkspace();
-            let Some(app) = workspace.frontmostApplication() else {
-                return;
+        let block = block2::RcBlock::new(move |notification: NonNull<NSNotification>| {
+            // Approach 1: Try to get the activated app from notification's userInfo.
+            // NSWorkspaceDidActivateApplicationNotification provides the app via
+            // NSWorkspaceApplicationKey. This is more accurate than frontmostApplication()
+            // for Dock-click scenarios where the frontmost app hasn't updated yet.
+            let app_info: Option<(Option<String>, i32)> = unsafe {
+                let notif = notification.as_ref();
+                notif.userInfo().and_then(|info| {
+                    let key = NSString::from_str("NSWorkspaceApplicationKey");
+                    info.objectForKey(&*key).map(|obj| {
+                        let app = &*(&*obj as *const _ as *const NSRunningApplication);
+                        (
+                            app.bundleIdentifier().map(|s| s.to_string()),
+                            app.processIdentifier(),
+                        )
+                    })
+                })
             };
 
-            let bundle_id_str = app.bundleIdentifier().map(|s| s.to_string());
+            // Fallback to frontmostApplication() if userInfo extraction failed
+            let (bundle_id_str, app_pid) = match app_info {
+                Some(info) => info,
+                None => {
+                    let workspace = NSWorkspace::sharedWorkspace();
+                    let Some(app) = workspace.frontmostApplication() else {
+                        return;
+                    };
+                    (
+                        app.bundleIdentifier().map(|s| s.to_string()),
+                        app.processIdentifier(),
+                    )
+                }
+            };
 
-            if is_tab_manager(&app, our_pid) {
+            if app_pid == our_pid {
                 // Tab manager is active → cancel pending "other" and emit immediately
                 cancel_pending_other_event();
                 let payload = AppActivationPayload {
@@ -124,7 +170,10 @@ pub fn start_observer(app_handle: AppHandle) {
                 if let Some(window) = app_handle_clone.get_webview_window("main") {
                     let _ = window.emit("app-activated", payload);
                 }
-            } else if is_target_app(&app) {
+            } else if bundle_id_str
+                .as_ref()
+                .is_some_and(|bid| is_supported_editor(bid))
+            {
                 // Editor is active → cancel pending "other" and emit immediately
                 cancel_pending_other_event();
                 notification::remove_all_delivered_notifications();

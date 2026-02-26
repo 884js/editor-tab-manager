@@ -25,7 +25,7 @@ function App() {
   const windowsBridgeRef = useRef<EditorWindow[]>([]);
   const activeIndexBridgeRef = useRef<number>(0);
   const refreshWindowsBridgeRef = useRef<() => Promise<void>>(async () => {});
-  const fetchWindowsBridgeRef = useRef<() => Promise<void>>(async () => {});
+  const fetchWindowsBridgeRef = useRef<() => Promise<number>>(async () => 0);
   const syncActiveTabBridgeRef = useRef<() => Promise<void>>(async () => {});
 
   // 1. Claude status (reads bridge refs lazily via event handlers)
@@ -49,6 +49,7 @@ function App() {
     addToHistory: history.addToHistory,
     currentBundleIdRef,
     isEditorActiveRef,
+    isTabManagerActiveRef,
     isVisibleRef,
     t,
   });
