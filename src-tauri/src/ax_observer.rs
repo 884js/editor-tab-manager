@@ -1,4 +1,5 @@
 use crate::editor_config::is_supported_editor;
+use crate::observer;
 use core_foundation::base::{CFRelease, TCFType};
 use core_foundation::runloop::{
     kCFRunLoopCommonModes, CFRunLoopAddSource, CFRunLoopGetMain, CFRunLoopSourceRef,
@@ -130,6 +131,10 @@ extern "C" fn ax_observer_callback(
 
             match notification_str.as_str() {
                 K_AX_FOCUSED_WINDOW_CHANGED => {
+                    // Approach 2: Cancel any pending "other" debounce event.
+                    // AX Observer only monitors editor processes, so this event
+                    // confirms an editor is active — cancel stale "other" events.
+                    observer::cancel_pending_other_event();
                     // Emit window-focus-changed event
                     let _ = window.emit("window-focus-changed", ());
                 }

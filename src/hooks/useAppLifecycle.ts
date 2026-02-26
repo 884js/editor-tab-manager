@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, type MutableRefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize, LogicalPosition, PhysicalPosition } from "@tauri-apps/api/window";
 import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,7 @@ import type { AppActivationPayload } from "../types/editor";
 import { getStore } from "../utils/store";
 
 interface UseAppLifecycleParams {
-  fetchWindowsRef: MutableRefObject<() => Promise<void>>;
+  fetchWindowsRef: MutableRefObject<() => Promise<number>>;
   syncActiveTabRef: MutableRefObject<() => Promise<void>>;
   showAddMenuRef: MutableRefObject<boolean>;
   setShowAddMenu: (show: boolean) => void;
@@ -387,15 +387,32 @@ export function useAppLifecycle({
           if (app_type === "editor" && bundle_id) {
             currentBundleIdRef.current = bundle_id;
           }
-          await appWindow.show();
+          if (app_type === "editor") {
+            // Approach 5: Wait 150ms for macOS window animation to complete
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+          // Approach 4: Position-based visibility (avoid unreliable hide/show)
+          await appWindow.setPosition(new PhysicalPosition(0, 0));
           isVisibleRef.current = true;
           if (app_type === "editor") {
-            await fetchWindowsRef.current();
+            const windowCount = await fetchWindowsRef.current();
             setTimeout(() => syncActiveTabRef.current(), 50);
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(
                 () => {}
               );
+            }
+            // Cold start: editor may not have windows yet, retry periodically
+            if (windowCount === 0) {
+              for (let i = 0; i < 8; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+                if (!isMounted || !isEditorActiveRef.current) break;
+                const count = await fetchWindowsRef.current();
+                if (count > 0) {
+                  setTimeout(() => syncActiveTabRef.current(), 50);
+                  break;
+                }
+              }
             }
           }
         } else {
@@ -407,7 +424,8 @@ export function useAppLifecycle({
               invoke("restore_window_positions", { bundle_id: bid }).catch(() => {});
             }
             if (isVisibleRef.current) {
-              await appWindow.hide();
+              // Approach 4: Move off-screen instead of hide()
+              await appWindow.setPosition(new PhysicalPosition(0, -10000));
               isVisibleRef.current = false;
             }
           }

@@ -49,6 +49,7 @@ function setup() {
     addToHistory: vi.fn(),
     currentBundleIdRef: { current: "com.microsoft.VSCode" as string | null },
     isEditorActiveRef: { current: true },
+    isTabManagerActiveRef: { current: false },
     isVisibleRef: { current: true },
     t: ((key: string) => key) as unknown as import("i18next").TFunction,
   };
