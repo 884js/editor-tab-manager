@@ -10,11 +10,11 @@ mode: single
 
 ## 現在の状況
 
-タスク #1〜#4 完了。全ビルド通過、テスト82件全パス。ウィンドウレベル設定、設定画面の別ウィンドウ分離、フロントエンドルーティング、Settings の自己完結化がすべて完了。
+全タスク (#1〜#5) 完了。ビルド・テスト (79件) 全パス。手動検証完了。PR #52 作成済み。
 
 ## 次にやること
 
-タスク #5: 結合テスト + 手動検証。`pnpm tauri dev` で動作確認。
+完了。PR レビュー待ち。
 
 ## タスク進捗
 
@@ -24,7 +24,7 @@ mode: single
 | 2 | lib.rs の setup 内にカスタムウィンドウレベル設定ロジックを追加 | `src-tauri/src/lib.rs` | M | ✓ |
 | 3 | lib.rs に設定ウィンドウ作成・管理コマンドを追加、トレイメニューのハンドラを変更、capabilities に設定ウィンドウの権限を追加 | `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json` | M | ✓ |
 | 4 | フロントエンドにウィンドウラベルベースのルーティングを追加、useAppLifecycle の設定表示ロジックを変更、Settings の閉じるボタン動作を変更 | `src/App.tsx`, `src/hooks/useAppLifecycle.ts`, `src/components/Settings.tsx` | M | ✓ |
-| 5 | 結合テスト、全受入条件の手動検証 | 全体 | M | → |
+| 5 | 結合テスト、全受入条件の手動検証 | 全体 | M | ✓ |
 
 > タスク定義の詳細は [plan.md](./plan.md) を参照
 
@@ -32,7 +32,7 @@ mode: single
 
 | ブランチ | PR URL | 状態 |
 |---------|--------|------|
-| - | - | - |
+| feature/tabbar-z-order-fix | https://github.com/884js/editor-tab-manager/pull/52 | Open |
 
 ## 作業ログ
 
