@@ -247,7 +247,7 @@ describe("useAppLifecycle", () => {
             app_type: "editor",
             bundle_id: "com.microsoft.VSCode",
             is_on_primary_screen: true,
-            is_large_window: false,
+            covers_editor: false,
           } satisfies AppActivationPayload,
         });
       });
@@ -282,7 +282,7 @@ describe("useAppLifecycle", () => {
             app_type: "other",
             bundle_id: "com.apple.Safari",
             is_on_primary_screen: true,
-            is_large_window: true,
+            covers_editor: true,
           } satisfies AppActivationPayload,
         });
       });
@@ -317,7 +317,7 @@ describe("useAppLifecycle", () => {
             app_type: "other",
             bundle_id: "com.apple.systempreferences",
             is_on_primary_screen: true,
-            is_large_window: false,
+            covers_editor: false,
           } satisfies AppActivationPayload,
         });
       });

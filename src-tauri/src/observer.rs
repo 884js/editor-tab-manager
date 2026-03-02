@@ -40,31 +40,55 @@ pub struct AppActivationPayload {
     pub app_type: String, // "editor", "tab_manager", or "other"
     pub bundle_id: Option<String>,
     pub is_on_primary_screen: bool,
-    pub is_large_window: bool,
+    pub covers_editor: bool,
 }
 
-/// Check if the frontmost window of the given PID covers most of the screen width.
-/// Returns Some(true) if large (>= 85% screen width), Some(false) if small,
-/// or None if no windows found (e.g., app is still launching).
-fn check_window_size_for_pid(pid: i32) -> Option<bool> {
-    let screen_width = crate::window_offset::get_primary_screen_size()
+/// Get PIDs of all running supported editors.
+fn get_running_editor_pids() -> Vec<i32> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let running_apps = workspace.runningApplications();
+    running_apps
+        .iter()
+        .filter_map(|app| {
+            let bid = app.bundleIdentifier()?;
+            if is_supported_editor(&bid.to_string()) {
+                Some(app.processIdentifier())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Get the maximum window width among all running editors.
+/// Returns None if no editors are running or no editor windows exist.
+fn get_max_editor_window_width() -> Option<f64> {
+    get_running_editor_pids()
+        .iter()
+        .filter_map(|&pid| crate::ax_helper::get_largest_window_size(pid))
         .map(|(w, _)| w)
-        .unwrap_or(1440.0);
-
-    crate::ax_helper::get_largest_window_size(pid)
-        .map(|(width, _)| width >= screen_width * LARGE_WINDOW_THRESHOLD)
+        .reduce(f64::max)
 }
 
-/// Window width threshold relative to screen width.
-/// Windows covering >= 85% of screen width are considered "large" and will hide the tab bar.
-const LARGE_WINDOW_THRESHOLD: f64 = 0.85;
+/// Check if the frontmost window covers the editor windows.
+/// Returns Some(true) if front window >= editor window width (editor hidden → hide tab bar),
+/// Some(false) if front window < editor window width (editor visible → show tab bar),
+/// or None if front app has no windows yet (cold start).
+fn is_front_covering_editor(front_pid: i32) -> Option<bool> {
+    let (front_width, _) = crate::ax_helper::get_largest_window_size(front_pid)?;
+
+    match get_max_editor_window_width() {
+        Some(editor_width) => Some(front_width >= editor_width),
+        None => Some(true), // No editor running → hide tab bar
+    }
+}
 
 const COLD_START_RETRY_COUNT: u32 = 4;
 const COLD_START_RETRY_INTERVAL_MS: u64 = 500;
 
 /// Re-check window size for a cold-starting app.
 /// Called when the initial check found no windows (app still launching).
-/// If a large window appears, re-emits app-activated to hide the tab bar.
+/// If the new window covers the editor, re-emits app-activated to hide the tab bar.
 fn schedule_cold_start_recheck(
     pid: i32,
     bundle_id: Option<String>,
@@ -80,27 +104,29 @@ fn schedule_cold_start_recheck(
             }
 
             // AX API is thread-safe, check from background thread
-            if let Some((width, _)) = crate::ax_helper::get_largest_window_size(pid) {
-                // Window appeared — check if large enough to hide tab bar
-                let bid = bundle_id;
-                let app_handle_main = Arc::clone(&app_handle);
-                let _ = app_handle.run_on_main_thread(move || {
-                    let screen_width = crate::window_offset::get_primary_screen_size()
-                        .map(|(sw, _)| sw)
-                        .unwrap_or(1440.0);
-
-                    if width >= screen_width * LARGE_WINDOW_THRESHOLD {
+            match is_front_covering_editor(pid) {
+                Some(true) => {
+                    // Window covers the editor → hide tab bar
+                    let bid = bundle_id;
+                    let app_handle_main = Arc::clone(&app_handle);
+                    let _ = app_handle.run_on_main_thread(move || {
                         let payload = AppActivationPayload {
                             app_type: "other".to_string(),
                             bundle_id: bid,
                             is_on_primary_screen: is_focused_on_primary_screen(),
-                            is_large_window: true,
+                            covers_editor: true,
                         };
                         emit_app_activated(&app_handle_main, payload);
-                    }
-                    // If small window, do nothing (tab bar is already visible)
-                });
-                return;
+                    });
+                    return;
+                }
+                Some(false) => {
+                    // Window doesn't cover editor → tab bar already visible
+                    return;
+                }
+                None => {
+                    // No windows yet → continue retrying
+                }
             }
         }
     });
@@ -159,21 +185,21 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
                         app_type: "editor".to_string(),
                         bundle_id: bid,
                         is_on_primary_screen: true,
-                        is_large_window: false,
+                        covers_editor: false,
                     };
                     emit_app_activated(&app_handle_main, payload);
                     return;
                 }
 
-                // Check if the other app's window covers most of the screen
+                // Check if the other app's window covers the editor
                 let pid = frontmost.processIdentifier();
-                match check_window_size_for_pid(pid) {
+                match is_front_covering_editor(pid) {
                     Some(large) => {
                         let payload = AppActivationPayload {
                             app_type: "other".to_string(),
                             bundle_id,
                             is_on_primary_screen: is_focused_on_primary_screen(),
-                            is_large_window: large,
+                            covers_editor: large,
                         };
                         emit_app_activated(&app_handle_main, payload);
                     }
@@ -185,7 +211,7 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
                             app_type: "other".to_string(),
                             bundle_id,
                             is_on_primary_screen: is_focused_on_primary_screen(),
-                            is_large_window: false,
+                            covers_editor: false,
                         };
                         emit_app_activated(&app_handle_main, payload);
                         schedule_cold_start_recheck(
@@ -201,7 +227,7 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
                     app_type: "other".to_string(),
                     bundle_id,
                     is_on_primary_screen: is_focused_on_primary_screen(),
-                    is_large_window: true,
+                    covers_editor: true,
                 };
                 emit_app_activated(&app_handle_main, payload);
             }
@@ -268,7 +294,7 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "tab_manager".to_string(),
                     bundle_id: None,
                     is_on_primary_screen: true,
-                    is_large_window: false,
+                    covers_editor: false,
                 };
                 emit_app_activated(&app_handle_clone, payload);
             } else if bundle_id_str
@@ -283,7 +309,7 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: true,
-                    is_large_window: false,
+                    covers_editor: false,
                 };
                 emit_app_activated(&app_handle_clone, payload);
             } else {
@@ -352,21 +378,21 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "tab_manager".to_string(),
                     bundle_id: None,
                     is_on_primary_screen: true,
-                    is_large_window: false,
+                    covers_editor: false,
                 }
             } else if is_target_app(&frontmost) {
                 AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: true,
-                    is_large_window: false,
+                    covers_editor: false,
                 }
             } else {
                 AppActivationPayload {
                     app_type: "other".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: is_focused_on_primary_screen(),
-                    is_large_window: true, // default: hide for initial state
+                    covers_editor: true, // default: hide for initial state
                 }
             };
 

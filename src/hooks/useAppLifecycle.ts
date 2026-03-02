@@ -309,7 +309,7 @@ export function useAppLifecycle({
       const unlisten = await listen<AppActivationPayload>("app-activated", async (event) => {
         if (!isMounted) return;
 
-        const { app_type, bundle_id, is_on_primary_screen, is_large_window } = event.payload;
+        const { app_type, bundle_id, is_on_primary_screen, covers_editor } = event.payload;
 
         if (app_type === "editor" || app_type === "tab_manager") {
           isEditorActiveRef.current = app_type === "editor";
@@ -355,9 +355,8 @@ export function useAppLifecycle({
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("restore_window_positions", { bundle_id: bid }).catch(() => {});
             }
-            // Only hide the tab bar for large windows (>= 85% screen width)
-            // Small windows (e.g., macOS Settings, dialogs) keep the tab bar visible
-            if (is_large_window && isVisibleRef.current) {
+            // Hide tab bar only when the front window covers the editor
+            if (covers_editor && isVisibleRef.current) {
               await appWindow.setPosition(new PhysicalPosition(0, -10000));
               isVisibleRef.current = false;
             }
