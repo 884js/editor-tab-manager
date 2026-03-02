@@ -266,6 +266,16 @@ fn windows_equal(a: &AXUIElement, b: &AXUIElement) -> bool {
     }
 }
 
+/// Get the size (width, height) of the largest visible window for an application by PID
+/// Returns None if no windows are found or AX API fails
+pub fn get_largest_window_size(pid: i32) -> Option<(f64, f64)> {
+    let frames = get_all_window_frames(pid).ok()?;
+    frames
+        .iter()
+        .map(|(_, _, _, w, h)| (*w, *h))
+        .max_by(|(w1, _), (w2, _)| w1.partial_cmp(w2).unwrap_or(std::cmp::Ordering::Equal))
+}
+
 /// Window frame info: (window_id, x, y, width, height)
 pub type WindowFrameInfo = (u32, f64, f64, f64, f64);
 

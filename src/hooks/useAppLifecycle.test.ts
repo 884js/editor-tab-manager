@@ -2,7 +2,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, primaryMonitor } from "@tauri-apps/api/window";
-import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { isEnabled } from "@tauri-apps/plugin-autostart";
 import { createMockStore } from "../test/setup";
 import type { AppActivationPayload } from "../types/editor";
 import { useAppLifecycle } from "./useAppLifecycle";
@@ -195,64 +195,7 @@ describe("useAppLifecycle", () => {
     });
   });
 
-  describe("settings toggles", () => {
-    it("toggles notification setting", async () => {
-      vi.mocked(invoke).mockResolvedValue(true);
-      const { result, params, mockStore } = setup();
-
-      await waitFor(() => {
-        expect(result.current.notificationEnabled).toBe(true);
-      });
-
-      await act(async () => {
-        await result.current.handleNotificationToggle(false);
-      });
-
-      expect(result.current.notificationEnabled).toBe(false);
-      expect(params.notificationEnabledRef.current).toBe(false);
-      expect(mockStore.set).toHaveBeenCalledWith("notification:enabled", false);
-    });
-
-    it("toggles autostart setting", async () => {
-      vi.mocked(invoke).mockResolvedValue(true);
-      const { result } = setup();
-
-      await act(async () => {
-        await result.current.handleAutostartToggle(true);
-      });
-
-      expect(result.current.autostartEnabled).toBe(true);
-      expect(enable).toHaveBeenCalled();
-
-      await act(async () => {
-        await result.current.handleAutostartToggle(false);
-      });
-
-      expect(result.current.autostartEnabled).toBe(false);
-      expect(disable).toHaveBeenCalled();
-    });
-
-    it("toggles showBranch setting", async () => {
-      vi.mocked(invoke).mockResolvedValue(true);
-      const { result, mockStore } = setup();
-
-      await act(async () => {
-        await result.current.handleShowBranchToggle(false);
-      });
-
-      expect(result.current.showBranch).toBe(false);
-      expect(mockStore.set).toHaveBeenCalledWith("settings:showBranch", false);
-    });
-
-    it("loads notification setting from store", async () => {
-      vi.mocked(invoke).mockResolvedValue(true);
-      const { result } = setup({ "notification:enabled": false });
-
-      await waitFor(() => {
-        expect(result.current.notificationEnabled).toBe(false);
-      });
-    });
-
+  describe("settings from store", () => {
     it("loads showBranch setting from store", async () => {
       vi.mocked(invoke).mockResolvedValue(true);
       const { result } = setup({ "settings:showBranch": false });
@@ -278,18 +221,6 @@ describe("useAppLifecycle", () => {
       expect(appWindow.setPosition).toHaveBeenCalled();
     });
 
-    it("handleSettingsClose resets to tab bar size", async () => {
-      const appWindow = getCurrentWindow();
-      vi.mocked(invoke).mockResolvedValue(true);
-      const { result } = setup();
-
-      await act(async () => {
-        await result.current.handleSettingsClose();
-      });
-
-      expect(result.current.showSettings).toBe(false);
-      expect(appWindow.setSize).toHaveBeenCalled();
-    });
   });
 
   describe("app-activated event", () => {
@@ -316,6 +247,7 @@ describe("useAppLifecycle", () => {
             app_type: "editor",
             bundle_id: "com.microsoft.VSCode",
             is_on_primary_screen: true,
+            covers_editor: false,
           } satisfies AppActivationPayload,
         });
       });
@@ -350,12 +282,49 @@ describe("useAppLifecycle", () => {
             app_type: "other",
             bundle_id: "com.apple.Safari",
             is_on_primary_screen: true,
+            covers_editor: true,
           } satisfies AppActivationPayload,
         });
       });
 
       expect(params.isEditorActiveRef.current).toBe(false);
       expect(appWindow.setPosition).toHaveBeenCalled();
+    });
+
+    it("keeps tab bar visible for small window apps", async () => {
+      vi.mocked(invoke).mockResolvedValue(true);
+      const { result, listeners, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.hasAccessibilityPermission).toBe(true);
+        expect(result.current.onboardingCompleted).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(listeners.has("app-activated")).toBe(true);
+      });
+
+      params.isVisibleRef.current = true;
+
+      const appWindow = getCurrentWindow();
+      vi.mocked(appWindow.setPosition).mockClear();
+      vi.mocked(invoke).mockResolvedValue(undefined);
+
+      await act(async () => {
+        const handler = listeners.get("app-activated")!;
+        handler({
+          payload: {
+            app_type: "other",
+            bundle_id: "com.apple.systempreferences",
+            is_on_primary_screen: true,
+            covers_editor: false,
+          } satisfies AppActivationPayload,
+        });
+      });
+
+      expect(params.isEditorActiveRef.current).toBe(false);
+      expect(params.isVisibleRef.current).toBe(true);
+      expect(appWindow.setPosition).not.toHaveBeenCalled();
     });
   });
 });

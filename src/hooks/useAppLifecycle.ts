@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize, LogicalPosition, PhysicalPosition } from "@tauri-apps/api/window";
 import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
-import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useTranslation } from "react-i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
 import type { AppActivationPayload } from "../types/editor";
@@ -26,14 +25,7 @@ interface UseAppLifecycleReturn {
   onboardingCompleted: boolean | null;
   handlePermissionGranted: () => void;
   handleOnboardingComplete: (dontShowAgain: boolean) => Promise<void>;
-  showSettings: boolean;
-  handleSettingsClose: () => Promise<void>;
-  notificationEnabled: boolean;
-  handleNotificationToggle: (enabled: boolean) => Promise<void>;
-  autostartEnabled: boolean;
-  handleAutostartToggle: (enabled: boolean) => Promise<void>;
   showBranch: boolean;
-  handleShowBranchToggle: (enabled: boolean) => Promise<void>;
   resizeTabBar: () => Promise<void>;
   handleColorPickerOpen: () => Promise<void>;
   handleColorPickerClose: () => Promise<void>;
@@ -53,19 +45,10 @@ export function useAppLifecycle({
   notificationEnabledRef,
 }: UseAppLifecycleParams): UseAppLifecycleReturn {
   const { t } = useTranslation();
-  const [showSettings, setShowSettings] = useState(false);
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
-  const [notificationEnabled, setNotificationEnabled] = useState(true);
-  const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [showBranch, setShowBranch] = useState(true);
-  const showSettingsRef = useRef(false);
   const isInitializedRef = useRef(false);
-
-  // Keep ref in sync
-  useEffect(() => {
-    showSettingsRef.current = showSettings;
-  }, [showSettings]);
 
   // Load notification + showBranch settings from store
   useEffect(() => {
@@ -74,29 +57,17 @@ export function useAppLifecycle({
         const store = await getStore();
         const saved = await store.get<boolean>("notification:enabled");
         if (saved !== null && saved !== undefined) {
-          setNotificationEnabled(saved);
           notificationEnabledRef.current = saved;
         }
-      } catch {
-        // default: enabled
-      }
-
-      try {
-        const store = await getStore();
         const savedBranch = await store.get<boolean>("settings:showBranch");
         if (savedBranch !== null && savedBranch !== undefined) {
           setShowBranch(savedBranch);
         }
       } catch {
-        // default: enabled
+        // defaults: notification enabled, showBranch enabled
       }
     };
     init();
-  }, []);
-
-  // Initialize autostart state
-  useEffect(() => {
-    isEnabled().then(setAutostartEnabled).catch(() => {});
   }, []);
 
   // Update tray menu when language changes
@@ -269,43 +240,6 @@ export function useAppLifecycle({
     adjustWindowSize();
   }, [hasAccessibilityPermission, onboardingCompleted]);
 
-  const handleAutostartToggle = useCallback(async (enabled: boolean) => {
-    try {
-      if (enabled) {
-        await enable();
-      } else {
-        await disable();
-      }
-      setAutostartEnabled(enabled);
-    } catch (error) {
-      console.error("Failed to toggle autostart:", error);
-    }
-  }, []);
-
-  const handleShowBranchToggle = useCallback(async (enabled: boolean) => {
-    setShowBranch(enabled);
-    try {
-      const store = await getStore();
-      await store.set("settings:showBranch", enabled);
-    } catch (error) {
-      console.error("Failed to save showBranch setting:", error);
-    }
-  }, []);
-
-  const handleNotificationToggle = useCallback(
-    async (enabled: boolean) => {
-      setNotificationEnabled(enabled);
-      notificationEnabledRef.current = enabled;
-      try {
-        const store = await getStore();
-        await store.set("notification:enabled", enabled);
-      } catch (error) {
-        console.error("Failed to save notification setting:", error);
-      }
-    },
-    [notificationEnabledRef]
-  );
-
   // Resize tab bar to match primary monitor width
   const resizeTabBar = useCallback(async () => {
     const appWindow = getCurrentWindow();
@@ -351,11 +285,6 @@ export function useAppLifecycle({
     [resizeTabBar, setShowAddMenu]
   );
 
-  const handleSettingsClose = useCallback(async () => {
-    setShowSettings(false);
-    await resizeTabBar();
-  }, [resizeTabBar]);
-
   // Event-driven visibility (no polling)
   useEffect(() => {
     if (hasAccessibilityPermission !== true || onboardingCompleted !== true) {
@@ -380,7 +309,7 @@ export function useAppLifecycle({
       const unlisten = await listen<AppActivationPayload>("app-activated", async (event) => {
         if (!isMounted) return;
 
-        const { app_type, bundle_id, is_on_primary_screen } = event.payload;
+        const { app_type, bundle_id, is_on_primary_screen, covers_editor } = event.payload;
 
         if (app_type === "editor" || app_type === "tab_manager") {
           isEditorActiveRef.current = app_type === "editor";
@@ -389,10 +318,9 @@ export function useAppLifecycle({
             currentBundleIdRef.current = bundle_id;
           }
           if (app_type === "editor") {
-            // Approach 5: Wait 150ms for macOS window animation to complete
+            // Wait 150ms for macOS window animation to complete
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
-          // Approach 4: Position-based visibility (avoid unreliable hide/show)
           await appWindow.setPosition(new PhysicalPosition(0, 0));
           isVisibleRef.current = true;
           if (app_type === "editor") {
@@ -427,8 +355,8 @@ export function useAppLifecycle({
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("restore_window_positions", { bundle_id: bid }).catch(() => {});
             }
-            if (isVisibleRef.current) {
-              // Approach 4: Move off-screen instead of hide()
+            // Hide tab bar only when the front window covers the editor
+            if (covers_editor && isVisibleRef.current) {
               await appWindow.setPosition(new PhysicalPosition(0, -10000));
               isVisibleRef.current = false;
             }
@@ -439,29 +367,10 @@ export function useAppLifecycle({
     };
     setupAppActivationListener();
 
-    const setupShowSettingsListener = async () => {
-      const unlisten = await listen("show-settings", async () => {
-        const monitor = await currentMonitor();
-        if (monitor) {
-          const screenWidth = monitor.size.width / monitor.scaleFactor;
-          const screenHeight = monitor.size.height / monitor.scaleFactor;
-          await appWindow.setMaxSize(new LogicalSize(screenWidth, screenHeight));
-          await appWindow.setSize(new LogicalSize(600, 600));
-          await appWindow.setPosition(
-            new LogicalPosition((screenWidth - 600) / 2, (screenHeight - 600) / 2)
-          );
-        }
-        await appWindow.show();
-        setShowSettings(true);
-      });
-      cleanupFns.push(unlisten);
-    };
-    setupShowSettingsListener();
-
     const setupDisplayChangedListener = async () => {
       const unlisten = await listen("display-changed", async () => {
         if (!isMounted) return;
-        if (showSettingsRef.current || showAddMenuRef.current) return;
+        if (showAddMenuRef.current) return;
         await resizeTabBar();
       });
       cleanupFns.push(unlisten);
@@ -490,14 +399,7 @@ export function useAppLifecycle({
     onboardingCompleted,
     handlePermissionGranted,
     handleOnboardingComplete,
-    showSettings,
-    handleSettingsClose,
-    notificationEnabled,
-    handleNotificationToggle,
-    autostartEnabled,
-    handleAutostartToggle,
     showBranch,
-    handleShowBranchToggle,
     resizeTabBar,
     handleColorPickerOpen,
     handleColorPickerClose,

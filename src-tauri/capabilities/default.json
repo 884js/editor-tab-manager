@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2/capability.schema.json",
   "identifier": "default",
   "description": "Default capabilities for the app",
-  "windows": ["main"],
+  "windows": ["main", "settings"],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -14,6 +14,7 @@
     "core:window:allow-set-max-size",
     "core:window:allow-set-position",
     "core:window:allow-current-monitor",
+    "core:window:allow-close",
     "shell:allow-open",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

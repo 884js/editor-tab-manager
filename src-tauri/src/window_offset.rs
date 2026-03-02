@@ -67,7 +67,7 @@ fn delete_offset_file() {
 /// プライマリディスプレイのサイズを取得
 /// NSScreen::screens() の最初の要素が常にプライマリディスプレイ
 /// (NSScreen::mainScreen はフォーカス中ウィンドウのスクリーンを返すため不適切)
-fn get_primary_screen_size() -> Option<(f64, f64)> {
+pub fn get_primary_screen_size() -> Option<(f64, f64)> {
     let mtm = MainThreadMarker::new()?;
     let screens = NSScreen::screens(mtm);
     let primary = screens.firstObject()?;

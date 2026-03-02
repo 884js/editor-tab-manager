@@ -40,6 +40,103 @@ pub struct AppActivationPayload {
     pub app_type: String, // "editor", "tab_manager", or "other"
     pub bundle_id: Option<String>,
     pub is_on_primary_screen: bool,
+    pub covers_editor: bool,
+}
+
+/// Get PIDs of all running supported editors.
+fn get_running_editor_pids() -> Vec<i32> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let running_apps = workspace.runningApplications();
+    running_apps
+        .iter()
+        .filter_map(|app| {
+            let bid = app.bundleIdentifier()?;
+            if is_supported_editor(&bid.to_string()) {
+                Some(app.processIdentifier())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Get the maximum window width among all running editors.
+/// Returns None if no editors are running or no editor windows exist.
+fn get_max_editor_window_width() -> Option<f64> {
+    get_running_editor_pids()
+        .iter()
+        .filter_map(|&pid| crate::ax_helper::get_largest_window_size(pid))
+        .map(|(w, _)| w)
+        .reduce(f64::max)
+}
+
+/// Check if the frontmost window covers the editor windows.
+/// Returns Some(true) if front window >= editor window width (editor hidden → hide tab bar),
+/// Some(false) if front window < editor window width (editor visible → show tab bar),
+/// or None if front app has no windows yet (cold start).
+fn is_front_covering_editor(front_pid: i32) -> Option<bool> {
+    let (front_width, _) = crate::ax_helper::get_largest_window_size(front_pid)?;
+
+    match get_max_editor_window_width() {
+        Some(editor_width) => Some(front_width >= editor_width),
+        None => Some(true), // No editor running → hide tab bar
+    }
+}
+
+const COLD_START_RETRY_COUNT: u32 = 4;
+const COLD_START_RETRY_INTERVAL_MS: u64 = 500;
+
+/// Re-check window size for a cold-starting app.
+/// Called when the initial check found no windows (app still launching).
+/// If the new window covers the editor, re-emits app-activated to hide the tab bar.
+fn schedule_cold_start_recheck(
+    pid: i32,
+    bundle_id: Option<String>,
+    app_handle: Arc<AppHandle>,
+    debounce_version: u64,
+) {
+    thread::spawn(move || {
+        for _ in 0..COLD_START_RETRY_COUNT {
+            thread::sleep(Duration::from_millis(COLD_START_RETRY_INTERVAL_MS));
+
+            if DEBOUNCE_VERSION.load(Ordering::SeqCst) != debounce_version {
+                return; // User switched to another app
+            }
+
+            // AX API is thread-safe, check from background thread
+            match is_front_covering_editor(pid) {
+                Some(true) => {
+                    // Window covers the editor → hide tab bar
+                    let bid = bundle_id;
+                    let app_handle_main = Arc::clone(&app_handle);
+                    let _ = app_handle.run_on_main_thread(move || {
+                        let payload = AppActivationPayload {
+                            app_type: "other".to_string(),
+                            bundle_id: bid,
+                            is_on_primary_screen: is_focused_on_primary_screen(),
+                            covers_editor: true,
+                        };
+                        emit_app_activated(&app_handle_main, payload);
+                    });
+                    return;
+                }
+                Some(false) => {
+                    // Window doesn't cover editor → tab bar already visible
+                    return;
+                }
+                None => {
+                    // No windows yet → continue retrying
+                }
+            }
+        }
+    });
+}
+
+/// Emit an app-activated event to the main window.
+fn emit_app_activated(app_handle: &AppHandle, payload: AppActivationPayload) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("app-activated", payload);
+    }
 }
 
 /// NSScreen::mainScreen() はフォーカス中ウィンドウのスクリーンを返す。
@@ -74,8 +171,9 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
         }
 
         let app_handle_main = Arc::clone(&app_handle_for_thread);
+        let app_handle_retry = Arc::clone(&app_handle_for_thread);
         let _ = app_handle_for_thread.run_on_main_thread(move || {
-            // Approach 3: Re-check frontmostApplication after debounce.
+            // Re-check frontmostApplication after debounce.
             // The app may have changed during the delay (e.g., editor became active).
             let workspace = NSWorkspace::sharedWorkspace();
             if let Some(frontmost) = workspace.frontmostApplication() {
@@ -87,21 +185,51 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
                         app_type: "editor".to_string(),
                         bundle_id: bid,
                         is_on_primary_screen: true,
+                        covers_editor: false,
                     };
-                    if let Some(window) = app_handle_main.get_webview_window("main") {
-                        let _ = window.emit("app-activated", payload);
-                    }
+                    emit_app_activated(&app_handle_main, payload);
                     return;
                 }
-            }
 
-            let payload = AppActivationPayload {
-                app_type: "other".to_string(),
-                bundle_id,
-                is_on_primary_screen: is_focused_on_primary_screen(),
-            };
-            if let Some(window) = app_handle_main.get_webview_window("main") {
-                let _ = window.emit("app-activated", payload);
+                // Check if the other app's window covers the editor
+                let pid = frontmost.processIdentifier();
+                match is_front_covering_editor(pid) {
+                    Some(large) => {
+                        let payload = AppActivationPayload {
+                            app_type: "other".to_string(),
+                            bundle_id,
+                            is_on_primary_screen: is_focused_on_primary_screen(),
+                            covers_editor: large,
+                        };
+                        emit_app_activated(&app_handle_main, payload);
+                    }
+                    None => {
+                        // Cold start: app has no windows yet.
+                        // Show tab bar initially, then recheck after window appears.
+                        let bid_retry = bundle_id.clone();
+                        let payload = AppActivationPayload {
+                            app_type: "other".to_string(),
+                            bundle_id,
+                            is_on_primary_screen: is_focused_on_primary_screen(),
+                            covers_editor: false,
+                        };
+                        emit_app_activated(&app_handle_main, payload);
+                        schedule_cold_start_recheck(
+                            pid,
+                            bid_retry,
+                            app_handle_retry,
+                            version,
+                        );
+                    }
+                }
+            } else {
+                let payload = AppActivationPayload {
+                    app_type: "other".to_string(),
+                    bundle_id,
+                    is_on_primary_screen: is_focused_on_primary_screen(),
+                    covers_editor: true,
+                };
+                emit_app_activated(&app_handle_main, payload);
             }
         });
     });
@@ -166,10 +294,9 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "tab_manager".to_string(),
                     bundle_id: None,
                     is_on_primary_screen: true,
+                    covers_editor: false,
                 };
-                if let Some(window) = app_handle_clone.get_webview_window("main") {
-                    let _ = window.emit("app-activated", payload);
-                }
+                emit_app_activated(&app_handle_clone, payload);
             } else if bundle_id_str
                 .as_ref()
                 .is_some_and(|bid| is_supported_editor(bid))
@@ -182,10 +309,9 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: true,
+                    covers_editor: false,
                 };
-                if let Some(window) = app_handle_clone.get_webview_window("main") {
-                    let _ = window.emit("app-activated", payload);
-                }
+                emit_app_activated(&app_handle_clone, payload);
             } else {
                 // Other app is active → schedule debounced emit
                 schedule_other_event(bundle_id_str, Arc::clone(&app_handle_clone));
@@ -252,24 +378,25 @@ pub fn start_observer(app_handle: AppHandle) {
                     app_type: "tab_manager".to_string(),
                     bundle_id: None,
                     is_on_primary_screen: true,
+                    covers_editor: false,
                 }
             } else if is_target_app(&frontmost) {
                 AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: true,
+                    covers_editor: false,
                 }
             } else {
                 AppActivationPayload {
                     app_type: "other".to_string(),
                     bundle_id: bundle_id_str,
                     is_on_primary_screen: is_focused_on_primary_screen(),
+                    covers_editor: true, // default: hide for initial state
                 }
             };
 
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let _ = window.emit("app-activated", payload);
-            }
+            emit_app_activated(&app_handle, payload);
         }
 
         // Keep the thread alive
