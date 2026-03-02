@@ -1,19 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useLanguage } from "../hooks/useLanguage";
+import { getStore } from "../utils/store";
 import VersionInfo from "./VersionInfo";
-
-interface SettingsProps {
-  onClose: () => void;
-  notificationEnabled: boolean;
-  onNotificationToggle: (enabled: boolean) => void;
-  autostartEnabled: boolean;
-  onAutostartToggle: (enabled: boolean) => void;
-  showBranchEnabled: boolean;
-  onShowBranchToggle: (enabled: boolean) => void;
-}
 
 function highlightJSON(json: string): React.ReactNode[] {
   const tokens: React.ReactNode[] = [];
@@ -98,7 +91,7 @@ const SETUP_CODE = `{
   }
 }`;
 
-function Settings({ onClose, notificationEnabled, onNotificationToggle, autostartEnabled, onAutostartToggle, showBranchEnabled, onShowBranchToggle }: SettingsProps) {
+function Settings() {
   const { t } = useTranslation();
   const { language, changeLanguage } = useLanguage();
   const [activeTab, setActiveTab] = useState<"settings" | "about">("settings");
@@ -108,6 +101,58 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
   const [openFileHover, setOpenFileHover] = useState(false);
   const [collapseHover, setCollapseHover] = useState(false);
   const [copyHover, setCopyHover] = useState(false);
+  const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [showBranchEnabled, setShowBranchEnabled] = useState(true);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const store = await getStore();
+        const notif = await store.get<boolean>("notification:enabled");
+        if (notif !== null && notif !== undefined) setNotificationEnabled(notif);
+        const branch = await store.get<boolean>("settings:showBranch");
+        if (branch !== null && branch !== undefined) setShowBranchEnabled(branch);
+      } catch { /* defaults */ }
+      try {
+        setAutostartEnabled(await isEnabled());
+      } catch { /* defaults */ }
+    };
+    init();
+  }, []);
+
+  const handleClose = useCallback(async () => {
+    await getCurrentWindow().close();
+  }, []);
+
+  const handleNotificationToggle = useCallback(async (enabled: boolean) => {
+    setNotificationEnabled(enabled);
+    try {
+      const store = await getStore();
+      await store.set("notification:enabled", enabled);
+    } catch (error) {
+      console.error("Failed to save notification setting:", error);
+    }
+  }, []);
+
+  const handleAutostartToggle = useCallback(async (enabled: boolean) => {
+    try {
+      if (enabled) await enable(); else await disable();
+      setAutostartEnabled(enabled);
+    } catch (error) {
+      console.error("Failed to toggle autostart:", error);
+    }
+  }, []);
+
+  const handleShowBranchToggle = useCallback(async (enabled: boolean) => {
+    setShowBranchEnabled(enabled);
+    try {
+      const store = await getStore();
+      await store.set("settings:showBranch", enabled);
+    } catch (error) {
+      console.error("Failed to save showBranch setting:", error);
+    }
+  }, []);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -138,7 +183,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
             ...styles.closeButton,
             ...(closeHover ? { color: "#ffffff" } : {}),
           }}
-          onClick={onClose}
+          onClick={handleClose}
           onMouseEnter={() => setCloseHover(true)}
           onMouseLeave={() => setCloseHover(false)}
         >
@@ -267,7 +312,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
                   ...styles.switchTrack,
                   ...(notificationEnabled ? styles.switchTrackActive : {}),
                 }}
-                onClick={() => onNotificationToggle(!notificationEnabled)}
+                onClick={() => handleNotificationToggle(!notificationEnabled)}
               >
                 <div
                   style={{
@@ -297,7 +342,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
                 ...styles.switchTrack,
                 ...(autostartEnabled ? styles.switchTrackActive : {}),
               }}
-              onClick={() => onAutostartToggle(!autostartEnabled)}
+              onClick={() => handleAutostartToggle(!autostartEnabled)}
             >
               <div
                 style={{
@@ -323,7 +368,7 @@ function Settings({ onClose, notificationEnabled, onNotificationToggle, autostar
                 ...styles.switchTrack,
                 ...(showBranchEnabled ? styles.switchTrackActive : {}),
               }}
-              onClick={() => onShowBranchToggle(!showBranchEnabled)}
+              onClick={() => handleShowBranchToggle(!showBranchEnabled)}
             >
               <div
                 style={{

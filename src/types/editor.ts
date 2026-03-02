@@ -39,6 +39,7 @@ export interface AppActivationPayload {
   app_type: "editor" | "tab_manager" | "other";
   bundle_id: string | null;
   is_on_primary_screen: boolean;
+  is_large_window: boolean;
 }
 
 // Claude Code status

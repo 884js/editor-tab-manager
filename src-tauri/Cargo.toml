@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSNotification", "NSString", "NSDictionary", "NSRunLoop", "NSDate", "NSOperation", "NSArray", "NSValue"] }
-objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSApplication", "NSScreen"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSApplication", "NSScreen", "NSWindow", "NSResponder"] }
 block2 = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]

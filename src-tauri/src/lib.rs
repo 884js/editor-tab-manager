@@ -9,7 +9,7 @@ mod window_offset;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconId};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use editor::{EditorState, EditorWindow};
@@ -143,6 +143,27 @@ fn update_tray_menu(app: AppHandle, settings_label: String, quit_label: String) 
     Ok(())
 }
 
+fn open_settings_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
+            .title("Editor Tab Manager Settings")
+            .inner_size(600.0, 600.0)
+            .center()
+            .resizable(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_settings_window(app: AppHandle) -> Result<(), String> {
+    open_settings_window(&app)
+}
+
 fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Cmd+Shift+T: New editor window
     let new_tab_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
@@ -244,12 +265,31 @@ pub fn run() {
             // Native notification
             notification::send_notification,
             // Tray menu
-            update_tray_menu
+            update_tray_menu,
+            // Settings window
+            show_settings_window
         ])
         .setup(|app| {
             // Set app as accessory (no Dock icon, menu bar only)
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Set custom window level above NSModalPanelWindowLevel (8)
+            // This ensures the tab bar stays above editor sub-windows (settings, modals, etc.)
+            // but below Dock (20), main menu (24), and status bar (25) levels
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| {
+                        unsafe {
+                            let ns_window: &objc2_app_kit::NSWindow =
+                                &*webview.ns_window().cast();
+                            // NSModalPanelWindowLevel = 8, set to 9 to be above modal panels
+                            ns_window.setLevel(9);
+                        }
+                    });
+                }
+            }
 
             // Restore any pending window positions from previous crash
             if window_offset::has_pending_restorations() {
@@ -269,11 +309,8 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     if event.id.as_ref() == "settings" {
-                        if let Some(window) = app.get_webview_window("main") {
-                            // ウィンドウを先に表示してからイベントを送信
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.emit("show-settings", ());
+                        if let Err(e) = open_settings_window(app) {
+                            eprintln!("Failed to show settings window: {}", e);
                         }
                     } else if event.id.as_ref() == "quit" {
                         // Restore window positions before quitting

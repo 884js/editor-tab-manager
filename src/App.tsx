@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar from "./components/TabBar";
 import Settings from "./components/Settings";
 import AccessibilityGuide from "./components/AccessibilityGuide";
@@ -10,7 +11,13 @@ import { useHistory } from "./hooks/useHistory";
 import { useEditorWindows } from "./hooks/useEditorWindows";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 
+const currentWindowLabel = getCurrentWindow().label;
+
 function App() {
+  // Settings window — render standalone settings
+  if (currentWindowLabel === "settings") {
+    return <Settings />;
+  }
   const { t } = useTranslation();
 
   // Shared mutable refs owned by App, distributed to hooks
@@ -96,41 +103,26 @@ function App() {
   }
 
   return (
-    <>
-      {!lifecycle.showSettings && (
-        <TabBar
-          tabs={editorWindows.windows}
-          activeIndex={editorWindows.activeIndex}
-          onTabClick={editorWindows.handleTabClick}
-          onNewTab={editorWindows.handleNewTab}
-          onCloseTab={editorWindows.handleCloseTab}
-          onReorder={editorWindows.handleReorder}
-          claudeStatuses={claude.claudeStatuses}
-          tabColors={editorWindows.tabColors}
-          onColorChange={editorWindows.handleColorChange}
-          onColorPickerOpen={lifecycle.handleColorPickerOpen}
-          onColorPickerClose={lifecycle.handleColorPickerClose}
-          showBranch={lifecycle.showBranch}
-          history={history.history}
-          showAddMenu={history.showAddMenu}
-          onAddMenuOpen={lifecycle.handleAddMenuOpen}
-          onAddMenuClose={lifecycle.handleAddMenuClose}
-          onHistorySelect={history.handleOpenFromHistory}
-          onHistoryClear={history.handleClearHistory}
-        />
-      )}
-      {lifecycle.showSettings && (
-        <Settings
-          onClose={lifecycle.handleSettingsClose}
-          notificationEnabled={lifecycle.notificationEnabled}
-          onNotificationToggle={lifecycle.handleNotificationToggle}
-          autostartEnabled={lifecycle.autostartEnabled}
-          onAutostartToggle={lifecycle.handleAutostartToggle}
-          showBranchEnabled={lifecycle.showBranch}
-          onShowBranchToggle={lifecycle.handleShowBranchToggle}
-        />
-      )}
-    </>
+    <TabBar
+      tabs={editorWindows.windows}
+      activeIndex={editorWindows.activeIndex}
+      onTabClick={editorWindows.handleTabClick}
+      onNewTab={editorWindows.handleNewTab}
+      onCloseTab={editorWindows.handleCloseTab}
+      onReorder={editorWindows.handleReorder}
+      claudeStatuses={claude.claudeStatuses}
+      tabColors={editorWindows.tabColors}
+      onColorChange={editorWindows.handleColorChange}
+      onColorPickerOpen={lifecycle.handleColorPickerOpen}
+      onColorPickerClose={lifecycle.handleColorPickerClose}
+      showBranch={lifecycle.showBranch}
+      history={history.history}
+      showAddMenu={history.showAddMenu}
+      onAddMenuOpen={lifecycle.handleAddMenuOpen}
+      onAddMenuClose={lifecycle.handleAddMenuClose}
+      onHistorySelect={history.handleOpenFromHistory}
+      onHistoryClear={history.handleClearHistory}
+    />
   );
 }
 
