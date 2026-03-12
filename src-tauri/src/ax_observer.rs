@@ -131,12 +131,18 @@ extern "C" fn ax_observer_callback(
 
             match notification_str.as_str() {
                 K_AX_FOCUSED_WINDOW_CHANGED => {
-                    // Approach 2: Cancel any pending "other" debounce event.
-                    // AX Observer only monitors editor processes, so this event
-                    // confirms an editor is active — cancel stale "other" events.
-                    observer::cancel_pending_other_event();
-                    // Emit window-focus-changed event
-                    let _ = window.emit("window-focus-changed", ());
+                    // Guard: Only process if an editor is actually in the foreground.
+                    // macOS can fire AXFocusedWindowChanged for background apps
+                    // (e.g., after sleep wake, window server state changes), which
+                    // would incorrectly re-show the tab bar.
+                    if get_frontmost_editor_pid().is_some() {
+                        // Approach 2: Cancel any pending "other" debounce event.
+                        // AX Observer only monitors editor processes, so this event
+                        // confirms an editor is active — cancel stale "other" events.
+                        observer::cancel_pending_other_event();
+                        // Emit window-focus-changed event
+                        let _ = window.emit("window-focus-changed", ());
+                    }
                 }
                 K_AX_WINDOW_CREATED | K_AX_UI_ELEMENT_DESTROYED | K_AX_TITLE_CHANGED => {
                     // Emit windows-changed event for window creation/destruction/title change
@@ -299,8 +305,7 @@ pub fn unregister_all() {
 }
 
 /// Get the PID of the frontmost supported editor
-#[allow(dead_code)]
-pub fn get_frontmost_editor_pid() -> Option<(i32, String)> {
+fn get_frontmost_editor_pid() -> Option<(i32, String)> {
     let workspace = NSWorkspace::sharedWorkspace();
     if let Some(app) = workspace.frontmostApplication() {
         if let Some(bid) = app.bundleIdentifier() {
