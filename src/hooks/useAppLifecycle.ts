@@ -371,6 +371,7 @@ export function useAppLifecycle({
       const unlisten = await listen("display-changed", async () => {
         if (!isMounted) return;
         if (showAddMenuRef.current) return;
+        if (!isVisibleRef.current) return;
         await resizeTabBar();
       });
       cleanupFns.push(unlisten);
