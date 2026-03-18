@@ -31,6 +31,8 @@ interface UseAppLifecycleReturn {
   handleColorPickerClose: () => Promise<void>;
   handleAddMenuOpen: () => Promise<void>;
   handleAddMenuClose: () => Promise<void>;
+  handleTabContextMenuOpen: () => Promise<void>;
+  handleTabContextMenuClose: () => Promise<void>;
 }
 
 export function useAppLifecycle({
@@ -277,6 +279,20 @@ export function useAppLifecycle({
     setShowAddMenu(true);
   }, [setShowAddMenu]);
 
+  const handleTabContextMenuOpen = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = await primaryMonitor();
+    if (monitor) {
+      const screenWidth = monitor.size.width / monitor.scaleFactor;
+      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 200));
+      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 200));
+    }
+  }, []);
+
+  const handleTabContextMenuClose = useCallback(async () => {
+    await resizeTabBar();
+  }, [resizeTabBar]);
+
   const handleAddMenuClose = useCallback(
     async () => {
       setShowAddMenu(false);
@@ -406,5 +422,7 @@ export function useAppLifecycle({
     handleColorPickerClose,
     handleAddMenuOpen,
     handleAddMenuClose,
+    handleTabContextMenuOpen,
+    handleTabContextMenuClose,
   };
 }

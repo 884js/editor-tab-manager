@@ -5,7 +5,7 @@ import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
-import type { EditorWindow, EditorState } from "../types/editor";
+import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
@@ -13,6 +13,14 @@ import {
   saveTabColors,
   windowKey,
   sortWindowsByOrder,
+  loadGroups,
+  saveGroups,
+  loadGroupAssignments,
+  saveGroupAssignments,
+  loadCollapsedGroups,
+  saveCollapsedGroups,
+  loadGroupColors,
+  saveGroupColors,
 } from "../utils/store";
 
 interface UseEditorWindowsParams {
@@ -30,6 +38,10 @@ interface UseEditorWindowsReturn {
   windows: EditorWindow[];
   activeIndex: number;
   tabColors: Record<string, string>;
+  groups: GroupDefinition[];
+  groupAssignments: GroupAssignment;
+  collapsedGroups: Set<string>;
+  groupColors: Record<string, string>;
   windowsRef: MutableRefObject<EditorWindow[]>;
   activeIndexRef: MutableRefObject<number>;
   refreshWindows: () => Promise<void>;
@@ -43,6 +55,14 @@ interface UseEditorWindowsReturn {
   handleCloseTab: (index: number) => Promise<void>;
   handleReorder: (from: number, to: number) => void;
   handleColorChange: (name: string, colorId: string | null) => void;
+  addGroup: (name: string) => string;
+  updateGroup: (groupId: string, name: string) => void;
+  deleteGroup: (groupId: string) => void;
+  assignTabToGroup: (wKey: string, groupId: string) => void;
+  unassignTabFromGroup: (wKey: string) => void;
+  toggleGroupCollapse: (groupId: string) => void;
+  reorderGroups: (fromIndex: number, toIndex: number) => void;
+  setGroupColor: (groupId: string, colorId: string | null) => void;
 }
 
 export function useEditorWindows({
@@ -58,6 +78,10 @@ export function useEditorWindows({
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [tabColors, setTabColors] = useState<Record<string, string>>({});
+  const [groups, setGroups] = useState<GroupDefinition[]>([]);
+  const [groupAssignments, setGroupAssignments] = useState<GroupAssignment>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [groupColors, setGroupColors] = useState<Record<string, string>>({});
   const windowsRef = useRef<EditorWindow[]>([]);
   const activeIndexRef = useRef<number>(0);
   const tabOrderRef = useRef<string[]>([]);
@@ -256,12 +280,128 @@ export function useEditorWindows({
     });
   }, []);
 
+  const addGroup = useCallback((name: string): string => {
+    const id = crypto.randomUUID();
+    setGroups((prev) => {
+      const newGroup: GroupDefinition = {
+        id,
+        name,
+        order: prev.length,
+      };
+      const next = [...prev, newGroup];
+      saveGroups(next);
+      return next;
+    });
+    return id;
+  }, []);
+
+  const updateGroup = useCallback((groupId: string, name: string) => {
+    setGroups((prev) => {
+      const next = prev.map((g) => (g.id === groupId ? { ...g, name } : g));
+      saveGroups(next);
+      return next;
+    });
+  }, []);
+
+  const deleteGroup = useCallback((groupId: string) => {
+    setGroups((prev) => {
+      const next = prev
+        .filter((g) => g.id !== groupId)
+        .map((g, i) => ({ ...g, order: i }));
+      saveGroups(next);
+      return next;
+    });
+    setGroupAssignments((prev) => {
+      const next: GroupAssignment = {};
+      for (const [key, gid] of Object.entries(prev)) {
+        if (gid !== groupId) next[key] = gid;
+      }
+      saveGroupAssignments(next);
+      return next;
+    });
+    setCollapsedGroups((prev) => {
+      if (!prev.has(groupId)) return prev;
+      const next = new Set(prev);
+      next.delete(groupId);
+      saveCollapsedGroups([...next]);
+      return next;
+    });
+  }, []);
+
+  const assignTabToGroup = useCallback((wKey: string, groupId: string) => {
+    setGroupAssignments((prev) => {
+      const next = { ...prev, [wKey]: groupId };
+      saveGroupAssignments(next);
+      return next;
+    });
+  }, []);
+
+  const unassignTabFromGroup = useCallback((wKey: string) => {
+    setGroupAssignments((prev) => {
+      const next = { ...prev };
+      delete next[wKey];
+      saveGroupAssignments(next);
+      return next;
+    });
+  }, []);
+
+  const toggleGroupCollapse = useCallback((groupId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      saveCollapsedGroups([...next]);
+      return next;
+    });
+  }, []);
+
+  const reorderGroups = useCallback((fromIndex: number, toIndex: number) => {
+    setGroups((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) {
+        return prev;
+      }
+      const sorted = [...prev].sort((a, b) => a.order - b.order);
+      const [moved] = sorted.splice(fromIndex, 1);
+      sorted.splice(toIndex, 0, moved);
+      const next = sorted.map((g, i) => ({ ...g, order: i }));
+      saveGroups(next);
+      return next;
+    });
+  }, []);
+
+  const setGroupColor = useCallback((groupId: string, colorId: string | null) => {
+    setGroupColors((prev) => {
+      const next = { ...prev };
+      if (colorId === null) {
+        delete next[groupId];
+      } else {
+        next[groupId] = colorId;
+      }
+      saveGroupColors(next);
+      return next;
+    });
+  }, []);
+
   const fetchWindows = useCallback(async (): Promise<number> => {
     try {
       if (!orderLoadedRef.current) {
-        const [order, colors] = await Promise.all([loadTabOrder(), loadTabColors()]);
+        const [order, colors, grps, assigns, collapsed, grpColors] = await Promise.all([
+          loadTabOrder(),
+          loadTabColors(),
+          loadGroups(),
+          loadGroupAssignments(),
+          loadCollapsedGroups(),
+          loadGroupColors(),
+        ]);
         tabOrderRef.current = order;
         setTabColors(colors);
+        setGroups(grps);
+        setGroupAssignments(assigns);
+        setCollapsedGroups(new Set(collapsed));
+        setGroupColors(grpColors);
         orderLoadedRef.current = true;
       }
 
@@ -425,6 +565,10 @@ export function useEditorWindows({
     windows,
     activeIndex,
     tabColors,
+    groups,
+    groupAssignments,
+    collapsedGroups,
+    groupColors,
     windowsRef,
     activeIndexRef,
     refreshWindows,
@@ -438,5 +582,13 @@ export function useEditorWindows({
     handleCloseTab,
     handleReorder,
     handleColorChange,
+    addGroup,
+    updateGroup,
+    deleteGroup,
+    assignTabToGroup,
+    unassignTabFromGroup,
+    toggleGroupCollapse,
+    reorderGroups,
+    setGroupColor,
   };
 }

@@ -69,7 +69,16 @@
     "hoursAgo": "{{count}}時間前",
     "daysAgo": "{{count}}日前"
   },
+  "group": {
+    "assignToGroup": "グループに割り当て",
+    "createNew": "新規グループ作成",
+    "newGroupPlaceholder": "グループ名",
+    "unassign": "グループ解除",
+    "rename": "名前を変更",
+    "delete": "グループを削除"
+  },
   "tabColor": {
+    "title": "色を設定",
     "red": "レッド",
     "orange": "オレンジ",
     "yellow": "イエロー",
