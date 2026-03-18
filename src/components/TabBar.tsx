@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import ColorPicker from "./ColorPicker";
@@ -233,7 +233,6 @@ function TabBar(props: TabBarProps) {
   // Group label drag & drop
   const handleGroupDragStart = useCallback((e: React.DragEvent, index: number) => {
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", `group:${index}`);
     setDraggedGroupIndex(index);
   }, []);
 
@@ -249,25 +248,28 @@ function TabBar(props: TabBarProps) {
     setDraggedGroupIndex(null);
   }, [draggedGroupIndex, onReorderGroups]);
 
-  // Build grouped tab structure
-  const sortedGroups = [...groups].sort((a, b) => a.order - b.order);
+  // Build grouped tab structure (memoized)
+  const { sortedGroups, groupedTabsMap, ungroupedTabs } = useMemo(() => {
+    const sorted = [...groups].sort((a, b) => a.order - b.order);
+    const groupIds = new Set(groups.map((g) => g.id));
+    const grouped = new Map<string, { tab: EditorWindow; originalIndex: number }[]>();
+    const ungrouped: { tab: EditorWindow; originalIndex: number }[] = [];
 
-  // Map tabs to their group
-  const groupedTabsMap = new Map<string, { tab: EditorWindow; originalIndex: number }[]>();
-  const ungroupedTabs: { tab: EditorWindow; originalIndex: number }[] = [];
-
-  tabs.forEach((tab, index) => {
-    const wKey = windowKey(tab);
-    const groupId = groupAssignments[wKey];
-    if (groupId && groups.some((g) => g.id === groupId)) {
-      if (!groupedTabsMap.has(groupId)) {
-        groupedTabsMap.set(groupId, []);
+    tabs.forEach((tab, index) => {
+      const wKey = windowKey(tab);
+      const groupId = groupAssignments[wKey];
+      if (groupId && groupIds.has(groupId)) {
+        if (!grouped.has(groupId)) {
+          grouped.set(groupId, []);
+        }
+        grouped.get(groupId)!.push({ tab, originalIndex: index });
+      } else {
+        ungrouped.push({ tab, originalIndex: index });
       }
-      groupedTabsMap.get(groupId)!.push({ tab, originalIndex: index });
-    } else {
-      ungroupedTabs.push({ tab, originalIndex: index });
-    }
-  });
+    });
+
+    return { sortedGroups: sorted, groupedTabsMap: grouped, ungroupedTabs: ungrouped };
+  }, [groups, tabs, groupAssignments]);
 
   const renderTab = (tab: EditorWindow, originalIndex: number) => (
     <Tab
@@ -447,7 +449,7 @@ function TabBar(props: TabBarProps) {
               </button>
               {groupSubmenuOpen && (
                 <div className="group-submenu" style={styles.submenu}>
-                  {groups.sort((a, b) => a.order - b.order).map((group) => (
+                  {sortedGroups.map((group) => (
                     <button
                       key={group.id}
                       className="context-menu-item"
@@ -483,24 +485,18 @@ function TabBar(props: TabBarProps) {
                       {t("group.createNew")}
                     </button>
                   )}
-                  {tabContextMenu && (() => {
-                    const tab = tabs[tabContextMenu.index];
-                    const wKey = tab ? windowKey(tab) : "";
-                    const currentGroupId = groupAssignments[wKey];
-                    if (!currentGroupId) return null;
-                    return (
-                      <>
-                        <div style={styles.contextMenuSeparator} />
-                        <button
-                          className="context-menu-item"
-                          style={styles.contextMenuItemDanger}
-                          onClick={handleUnassignFromGroup}
-                        >
-                          {t("group.unassign")}
-                        </button>
-                      </>
-                    );
-                  })()}
+                  {tabContextMenu && groupAssignments[tabs[tabContextMenu.index] ? windowKey(tabs[tabContextMenu.index]) : ""] && (
+                    <>
+                      <div style={styles.contextMenuSeparator} />
+                      <button
+                        className="context-menu-item"
+                        style={{ ...styles.contextMenuItem, color: "#f44747" }}
+                        onClick={handleUnassignFromGroup}
+                      >
+                        {t("group.unassign")}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -541,7 +537,7 @@ function TabBar(props: TabBarProps) {
             <div style={styles.contextMenuSeparator} />
             <button
               className="context-menu-item"
-              style={styles.contextMenuItemDanger}
+              style={{ ...styles.contextMenuItem, color: "#f44747" }}
               onClick={() => handleGroupDelete(groupLabelMenu.groupId)}
             >
               {t("group.delete")}
@@ -680,17 +676,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     background: "transparent",
     color: "rgba(255, 255, 255, 0.9)",
-    fontSize: "12px",
-    textAlign: "left" as const,
-    cursor: "pointer",
-  },
-  contextMenuItemDanger: {
-    display: "block",
-    width: "100%",
-    padding: "6px 12px",
-    border: "none",
-    background: "transparent",
-    color: "#f44747",
     fontSize: "12px",
     textAlign: "left" as const,
     cursor: "pointer",

@@ -78,12 +78,8 @@ body {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
-/* Group label input focus */
-.group-label-input:focus {
-  border-color: #007aff !important;
-}
-
-/* New group input focus */
+/* Group input focus */
+.group-label-input:focus,
 .new-group-input:focus {
   border-color: #007aff !important;
 }
