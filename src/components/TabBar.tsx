@@ -14,6 +14,7 @@ interface TabBarProps {
   onNewTab: () => void;
   onCloseTab: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  onReorderByVisual: (visualOrder: number[]) => void;
   claudeStatuses?: Record<string, ClaudeStatus>;
   tabColors?: Record<string, string>;
   onColorChange?: (windowName: string, colorId: string | null) => void;
@@ -43,6 +44,9 @@ interface TabBarProps {
 }
 
 // フルパスからプロジェクト名を抽出してマッチング
+const toRgba = (rgb: { r: number; g: number; b: number }, alpha: number) =>
+  `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+
 const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, ClaudeStatus>) => {
   if (!statuses) return undefined;
   for (const [fullPath, status] of Object.entries(statuses)) {
@@ -53,7 +57,7 @@ const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, Claude
 };
 
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabToGroup, onUnassignTabFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabToGroup, onUnassignTabFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
@@ -82,13 +86,6 @@ function TabBar(props: TabBarProps) {
     // Could be used for visual feedback in the future
   }, []);
 
-  const handleDrop = useCallback((toIndex: number) => {
-    if (draggedIndex !== null && draggedIndex !== toIndex) {
-      onReorder(draggedIndex, toIndex);
-    }
-    setDraggedIndex(null);
-  }, [draggedIndex, onReorder]);
-
   // Stable callback that receives index from Tab component
   const handleTabClick = useCallback((index: number) => {
     onTabClick(index);
@@ -109,6 +106,7 @@ function TabBar(props: TabBarProps) {
       const rect = tabContextMenu.rect;
       setColorPickerAnchorLeft(rect.left - containerRect.left + rect.width / 2);
       const idx = tabContextMenu.index;
+      // Clear context menu state without resizing window (ColorPicker will resize)
       setTabContextMenu(null);
       setGroupSubmenuOpen(false);
       setNewGroupInput(null);
@@ -249,7 +247,7 @@ function TabBar(props: TabBarProps) {
   }, [draggedGroupIndex, onReorderGroups]);
 
   // Build grouped tab structure (memoized)
-  const { sortedGroups, groupedTabsMap, ungroupedTabs } = useMemo(() => {
+  const { sortedGroups, groupedTabsMap, ungroupedTabs, visualOrder, originalToVisual } = useMemo(() => {
     const sorted = [...groups].sort((a, b) => a.order - b.order);
     const groupIds = new Set(groups.map((g) => g.id));
     const grouped = new Map<string, { tab: EditorWindow; originalIndex: number }[]>();
@@ -268,8 +266,47 @@ function TabBar(props: TabBarProps) {
       }
     });
 
-    return { sortedGroups: sorted, groupedTabsMap: grouped, ungroupedTabs: ungrouped };
+    // Build visual order: flat array of originalIndex in display order
+    const visualOrder: number[] = [];
+    for (const group of sorted) {
+      const groupTabs = grouped.get(group.id);
+      if (groupTabs) {
+        for (const { originalIndex } of groupTabs) {
+          visualOrder.push(originalIndex);
+        }
+      }
+    }
+    for (const { originalIndex } of ungrouped) {
+      visualOrder.push(originalIndex);
+    }
+
+    // Map from originalIndex -> visualIndex
+    const originalToVisual = new Map<number, number>();
+    visualOrder.forEach((origIdx, visIdx) => {
+      originalToVisual.set(origIdx, visIdx);
+    });
+
+    return { sortedGroups: sorted, groupedTabsMap: grouped, ungroupedTabs: ungrouped, visualOrder, originalToVisual };
   }, [groups, tabs, groupAssignments]);
+
+  const handleDrop = useCallback((toOriginalIndex: number) => {
+    if (draggedIndex !== null && draggedIndex !== toOriginalIndex) {
+      const hasGroups = groups.length > 0;
+      if (!hasGroups) {
+        onReorder(draggedIndex, toOriginalIndex);
+      } else {
+        const fromVisual = originalToVisual.get(draggedIndex);
+        const toVisual = originalToVisual.get(toOriginalIndex);
+        if (fromVisual !== undefined && toVisual !== undefined) {
+          const newVisual = [...visualOrder];
+          const [moved] = newVisual.splice(fromVisual, 1);
+          newVisual.splice(toVisual, 0, moved);
+          onReorderByVisual(newVisual);
+        }
+      }
+    }
+    setDraggedIndex(null);
+  }, [draggedIndex, groups.length, onReorder, onReorderByVisual, originalToVisual, visualOrder]);
 
   const renderTab = (tab: EditorWindow, originalIndex: number) => (
     <Tab
@@ -305,8 +342,8 @@ function TabBar(props: TabBarProps) {
           const groupContainerStyle: React.CSSProperties = {
             ...styles.groupContainer,
             ...(groupColor ? {
-              background: `rgba(${groupColor.rgb.r}, ${groupColor.rgb.g}, ${groupColor.rgb.b}, 0.1)`,
-              border: `1px solid rgba(${groupColor.rgb.r}, ${groupColor.rgb.g}, ${groupColor.rgb.b}, 0.25)`,
+              background: toRgba(groupColor.rgb, 0.1),
+              border: `1px solid ${toRgba(groupColor.rgb, 0.25)}`,
             } : {}),
           };
 
@@ -340,7 +377,7 @@ function TabBar(props: TabBarProps) {
                     ...styles.groupLabel,
                     opacity: draggedGroupIndex === groupIndex ? 0.5 : 1,
                     ...(groupColor ? {
-                      background: `rgba(${groupColor.rgb.r}, ${groupColor.rgb.g}, ${groupColor.rgb.b}, 0.2)`,
+                      background: toRgba(groupColor.rgb, 0.2),
                       color: groupColor.hex,
                     } : {}),
                   }}
@@ -485,7 +522,7 @@ function TabBar(props: TabBarProps) {
                       {t("group.createNew")}
                     </button>
                   )}
-                  {tabContextMenu && groupAssignments[tabs[tabContextMenu.index] ? windowKey(tabs[tabContextMenu.index]) : ""] && (
+                  {tabContextMenu && tabs[tabContextMenu.index] && groupAssignments[windowKey(tabs[tabContextMenu.index])] && (
                     <>
                       <div style={styles.contextMenuSeparator} />
                       <button
