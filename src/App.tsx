@@ -110,6 +110,7 @@ function App() {
       onNewTab={editorWindows.handleNewTab}
       onCloseTab={editorWindows.handleCloseTab}
       onReorder={editorWindows.handleReorder}
+      onReorderByVisual={editorWindows.handleReorderByVisual}
       claudeStatuses={claude.claudeStatuses}
       tabColors={editorWindows.tabColors}
       onColorChange={editorWindows.handleColorChange}

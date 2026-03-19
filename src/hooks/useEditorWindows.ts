@@ -54,6 +54,7 @@ interface UseEditorWindowsReturn {
   handleNewTab: () => Promise<void>;
   handleCloseTab: (index: number) => Promise<void>;
   handleReorder: (from: number, to: number) => void;
+  handleReorderByVisual: (visualOrder: number[]) => void;
   handleColorChange: (name: string, colorId: string | null) => void;
   addGroup: (name: string) => string;
   updateGroup: (groupId: string, name: string) => void;
@@ -265,6 +266,25 @@ export function useEditorWindows({
 
     setWindows(newWindows);
     setActiveIndex(newActiveIndex);
+  }, []);
+
+  // Reorder using visual order: accepts array of original indices in desired visual order
+  const handleReorderByVisual = useCallback((visualOrder: number[]) => {
+    const currentWindows = windowsRef.current;
+    const newWindows = visualOrder.map((i) => currentWindows[i]);
+
+    const newOrder = newWindows.map((w) => windowKey(w));
+    tabOrderRef.current = newOrder;
+    saveTabOrder(newOrder);
+
+    // Find new active index
+    const activeWindow = currentWindows[activeIndexRef.current];
+    const newActiveIndex = activeWindow
+      ? newWindows.findIndex((w) => w.id === activeWindow.id)
+      : 0;
+
+    setWindows(newWindows);
+    setActiveIndex(Math.max(newActiveIndex, 0));
   }, []);
 
   const handleColorChange = useCallback((windowName: string, colorId: string | null) => {
@@ -581,6 +601,7 @@ export function useEditorWindows({
     handleNewTab,
     handleCloseTab,
     handleReorder,
+    handleReorderByVisual,
     handleColorChange,
     addGroup,
     updateGroup,

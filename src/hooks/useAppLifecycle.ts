@@ -265,13 +265,16 @@ export function useAppLifecycle({
     }
   }, []);
 
-  const handleColorPickerOpen = useCallback(() => expandWindow(50), [expandWindow]);
-  const handleColorPickerClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
-  const handleTabContextMenuOpen = useCallback(() => expandWindow(200), [expandWindow]);
-  const handleTabContextMenuClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
+  const COLOR_PICKER_HEIGHT = 50;
+  const CONTEXT_MENU_HEIGHT = 200;
+  const ADD_MENU_HEIGHT = 420;
+
+  const handleColorPickerOpen = useCallback(() => expandWindow(COLOR_PICKER_HEIGHT), [expandWindow]);
+  const handleTabContextMenuOpen = useCallback(() => expandWindow(CONTEXT_MENU_HEIGHT), [expandWindow]);
+  const handleOverlayClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
 
   const handleAddMenuOpen = useCallback(async () => {
-    await expandWindow(420);
+    await expandWindow(ADD_MENU_HEIGHT);
     setShowAddMenu(true);
   }, [expandWindow, setShowAddMenu]);
 
@@ -401,10 +404,10 @@ export function useAppLifecycle({
     showBranch,
     resizeTabBar,
     handleColorPickerOpen,
-    handleColorPickerClose,
+    handleColorPickerClose: handleOverlayClose,
     handleAddMenuOpen,
     handleAddMenuClose,
     handleTabContextMenuOpen,
-    handleTabContextMenuClose,
+    handleTabContextMenuClose: handleOverlayClose,
   };
 }
