@@ -69,7 +69,16 @@
     "hoursAgo": "{{count}}h ago",
     "daysAgo": "{{count}}d ago"
   },
+  "group": {
+    "assignToGroup": "Assign to Group",
+    "createNew": "Create New Group",
+    "newGroupPlaceholder": "Group name",
+    "unassign": "Unassign from Group",
+    "rename": "Rename",
+    "delete": "Delete Group"
+  },
   "tabColor": {
+    "title": "Set Color",
     "red": "Red",
     "orange": "Orange",
     "yellow": "Yellow",

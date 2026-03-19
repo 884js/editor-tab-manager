@@ -42,6 +42,17 @@ export interface AppActivationPayload {
   covers_editor: boolean;
 }
 
+// Tab grouping
+export interface GroupDefinition {
+  id: string;
+  name: string;
+  order: number;
+}
+
+export interface GroupAssignment {
+  [windowKey: string]: string; // windowKey -> groupId
+}
+
 // Claude Code status
 export type ClaudeStatus = "waiting" | "generating";
 

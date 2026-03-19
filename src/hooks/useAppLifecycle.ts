@@ -31,6 +31,8 @@ interface UseAppLifecycleReturn {
   handleColorPickerClose: () => Promise<void>;
   handleAddMenuOpen: () => Promise<void>;
   handleAddMenuClose: () => Promise<void>;
+  handleTabContextMenuOpen: () => Promise<void>;
+  handleTabContextMenuClose: () => Promise<void>;
 }
 
 export function useAppLifecycle({
@@ -252,30 +254,26 @@ export function useAppLifecycle({
     }
   }, []);
 
-  const handleColorPickerOpen = useCallback(async () => {
+  const expandWindow = useCallback(async (extraHeight: number) => {
     const appWindow = getCurrentWindow();
     const monitor = await primaryMonitor();
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
-      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 50));
+      const size = new LogicalSize(screenWidth, TAB_BAR_HEIGHT + extraHeight);
+      await appWindow.setMaxSize(size);
+      await appWindow.setSize(size);
     }
   }, []);
 
-  const handleColorPickerClose = useCallback(async () => {
-    await resizeTabBar();
-  }, [resizeTabBar]);
+  const handleColorPickerOpen = useCallback(() => expandWindow(50), [expandWindow]);
+  const handleColorPickerClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
+  const handleTabContextMenuOpen = useCallback(() => expandWindow(200), [expandWindow]);
+  const handleTabContextMenuClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
 
   const handleAddMenuOpen = useCallback(async () => {
-    const appWindow = getCurrentWindow();
-    const monitor = await primaryMonitor();
-    if (monitor) {
-      const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 420));
-      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT + 420));
-    }
+    await expandWindow(420);
     setShowAddMenu(true);
-  }, [setShowAddMenu]);
+  }, [expandWindow, setShowAddMenu]);
 
   const handleAddMenuClose = useCallback(
     async () => {
@@ -406,5 +404,7 @@ export function useAppLifecycle({
     handleColorPickerClose,
     handleAddMenuOpen,
     handleAddMenuClose,
+    handleTabContextMenuOpen,
+    handleTabContextMenuClose,
   };
 }

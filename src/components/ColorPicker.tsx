@@ -30,7 +30,7 @@ function ColorPicker({ currentColorId, onSelect, onClose, anchorLeft }: ColorPic
         ...styles.container,
         ...(anchorLeft !== undefined ? {
           top: "100%",
-          left: `${anchorLeft}px`,
+          left: `${Math.max(anchorLeft, 120)}px`,
           transform: "translateX(-50%)",
           marginTop: "4px",
         } : {}),

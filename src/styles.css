@@ -67,3 +67,19 @@ body {
 .pulse-animation {
   animation: pulse 1.5s ease-in-out infinite;
 }
+
+/* Group label hover */
+.group-label:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Context menu item hover */
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Group input focus */
+.group-label-input:focus,
+.new-group-input:focus {
+  border-color: #007aff !important;
+}

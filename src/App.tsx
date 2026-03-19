@@ -122,6 +122,20 @@ function App() {
       onAddMenuClose={lifecycle.handleAddMenuClose}
       onHistorySelect={history.handleOpenFromHistory}
       onHistoryClear={history.handleClearHistory}
+      groups={editorWindows.groups}
+      groupAssignments={editorWindows.groupAssignments}
+      collapsedGroups={editorWindows.collapsedGroups}
+      onAddGroup={editorWindows.addGroup}
+      onUpdateGroup={editorWindows.updateGroup}
+      onDeleteGroup={editorWindows.deleteGroup}
+      onAssignTabToGroup={editorWindows.assignTabToGroup}
+      onUnassignTabFromGroup={editorWindows.unassignTabFromGroup}
+      onToggleGroupCollapse={editorWindows.toggleGroupCollapse}
+      onReorderGroups={editorWindows.reorderGroups}
+      groupColors={editorWindows.groupColors}
+      onSetGroupColor={editorWindows.setGroupColor}
+      onTabContextMenuOpen={lifecycle.handleTabContextMenuOpen}
+      onTabContextMenuClose={lifecycle.handleTabContextMenuClose}
     />
   );
 }
