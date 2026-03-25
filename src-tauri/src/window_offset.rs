@@ -138,7 +138,26 @@ pub fn maximize_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) -> 
     }
 
     let (ax_x, ax_y, width, height) = get_maximize_frame(tab_bar_height)?;
-    ax_helper::set_window_frame_by_id(pid, window_id, ax_x, ax_y, width, height)
+    ax_helper::set_window_frame_by_id(pid, window_id, ax_x, ax_y, width, height)?;
+
+    // OFFSET_STORE を更新: restore時にタブバーなしの最大化位置に復元されるようにする
+    let menu_bar_height = get_menu_bar_height();
+    let mut store = OFFSET_STORE.lock().map_err(|e| format!("Lock error: {}", e))?;
+    if let Some(editor_positions) = store.positions.get_mut(bundle_id) {
+        if let std::collections::hash_map::Entry::Occupied(mut e) = editor_positions.entry(window_id) {
+            e.insert(WindowFrame {
+                x: ax_x,
+                y: menu_bar_height,
+                width,
+                height: height + tab_bar_height,
+            });
+            if let Err(e) = save_to_file(&store) {
+                eprintln!("Failed to save offset file: {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Apply window offset for all windows of the specified editor
