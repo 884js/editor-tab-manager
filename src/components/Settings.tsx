@@ -106,6 +106,10 @@ function Settings() {
   const [showBranchEnabled, setShowBranchEnabled] = useState(true);
 
   useEffect(() => {
+    getCurrentWindow().setTitle(t("settings.title"));
+  }, [t]);
+
+  useEffect(() => {
     const init = async () => {
       try {
         const store = await getStore();

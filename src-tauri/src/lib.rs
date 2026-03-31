@@ -299,7 +299,7 @@ pub fn run() {
             }
 
             // Setup menu bar tray icon
-            let settings_item = MenuItem::with_id(app, "settings", "設定...", true, None::<&str>)?;
+            let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Editor Tab Manager", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 

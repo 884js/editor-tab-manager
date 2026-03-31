@@ -46,13 +46,13 @@ export function useAppLifecycle({
   currentBundleIdRef,
   notificationEnabledRef,
 }: UseAppLifecycleParams): UseAppLifecycleReturn {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
   const [showBranch, setShowBranch] = useState(true);
   const isInitializedRef = useRef(false);
 
-  // Load notification + showBranch settings from store
+  // Load notification + showBranch + language settings from store
   useEffect(() => {
     const init = async () => {
       try {
@@ -64,6 +64,10 @@ export function useAppLifecycle({
         const savedBranch = await store.get<boolean>("settings:showBranch");
         if (savedBranch !== null && savedBranch !== undefined) {
           setShowBranch(savedBranch);
+        }
+        const savedLang = await store.get<string>("language");
+        if (savedLang && savedLang !== i18n.language) {
+          await i18n.changeLanguage(savedLang);
         }
       } catch {
         // defaults: notification enabled, showBranch enabled
