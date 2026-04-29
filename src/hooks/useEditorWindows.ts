@@ -566,11 +566,66 @@ export function useEditorWindows({
       });
       cleanupFns.push(unlistenWindowFocus);
 
-      const unlistenWindowsChanged = await listen("windows-changed", () => {
-        if (!isMounted || !isEditorActiveRef.current) return;
-        refreshWindowsRef.current();
+      const unlistenSnapshot = await listen<{
+        windows: EditorWindow[];
+        active_id: number | null;
+        source: string;
+      }>("windows:snapshot", (event) => {
+        if (!isMounted) return;
+
+        if (!orderLoadedRef.current) {
+          // Initial load hasn't run yet — let fetchWindows handle first paint
+          // so colors/groups/etc. load atomically with the window list.
+          return;
+        }
+
+        const sorted = sortWindowsByOrder(event.payload.windows, tabOrderRef.current);
+        const newOrder = sorted.map((w) => windowKey(w));
+        const orderChanged =
+          newOrder.length !== tabOrderRef.current.length ||
+          newOrder.some((key, i) => tabOrderRef.current[i] !== key);
+        if (orderChanged) {
+          tabOrderRef.current = newOrder;
+        }
+
+        const currentWindows = windowsRef.current;
+        const windowsChanged =
+          sorted.length !== currentWindows.length ||
+          sorted.some(
+            (w, i) =>
+              currentWindows[i]?.name !== w.name ||
+              currentWindows[i]?.bundle_id !== w.bundle_id ||
+              currentWindows[i]?.branch !== w.branch
+          );
+
+        if (windowsChanged) {
+          const newKeys = new Set(sorted.map((w) => windowKey(w)));
+          const disappeared = currentWindows.filter(
+            (w) => !newKeys.has(windowKey(w)) && w.path
+          );
+          if (disappeared.length > 0) {
+            addToHistory(disappeared);
+          }
+
+          setWindows(sorted);
+          if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
+            setActiveIndex(sorted.length - 1);
+          }
+        }
+
+        // Map active_id (CGWindowID) → activeIndex in the sorted list.
+        // Runs even when windows didn't change: Registry also emits on active change.
+        const { active_id } = event.payload;
+        if (active_id !== null && active_id !== undefined) {
+          const idx = sorted.findIndex((w) => w.id === active_id);
+          if (idx >= 0 && idx !== activeIndexRef.current) {
+            setActiveIndex(idx);
+            activeIndexRef.current = idx;
+            syncWaitingTimer();
+          }
+        }
       });
-      cleanupFns.push(unlistenWindowsChanged);
+      cleanupFns.push(unlistenSnapshot);
     };
 
     setupListeners();

@@ -145,8 +145,10 @@ extern "C" fn ax_observer_callback(
                     }
                 }
                 K_AX_WINDOW_CREATED | K_AX_UI_ELEMENT_DESTROYED | K_AX_TITLE_CHANGED => {
-                    // Emit windows-changed event for window creation/destruction/title change
-                    let _ = window.emit("windows-changed", ());
+                    // Delegate to the registry — it debounces via snapshot diff
+                    // and only emits "windows:snapshot" when something actually changed.
+                    let _ = window;
+                    crate::window_registry::request_refresh("ax-event");
                 }
                 _ => {}
             }

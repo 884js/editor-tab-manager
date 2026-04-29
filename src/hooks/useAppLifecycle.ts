@@ -298,7 +298,6 @@ export function useAppLifecycle({
 
     const appWindow = getCurrentWindow();
     let isMounted = true;
-    let coldStartRetryVersion = 0;
     const cleanupFns: (() => void)[] = [];
 
     const initWindow = async () => {
@@ -329,28 +328,17 @@ export function useAppLifecycle({
           await appWindow.setPosition(new PhysicalPosition(0, 0));
           isVisibleRef.current = true;
           if (app_type === "editor") {
-            const windowCount = await fetchWindowsRef.current();
+            await fetchWindowsRef.current();
             setTimeout(() => syncActiveTabRef.current(), 50);
             for (const bid of ALL_EDITOR_BUNDLE_IDS) {
               invoke("apply_window_offset", { bundle_id: bid, offset_y: TAB_BAR_HEIGHT }).catch(
                 () => {}
               );
             }
-            // Cold start: editor may not have windows yet, retry periodically
-            if (windowCount === 0) {
-              const RETRY_COUNT = 8;
-              const RETRY_INTERVAL_MS = 500;
-              const currentVersion = ++coldStartRetryVersion;
-              for (let i = 0; i < RETRY_COUNT; i++) {
-                await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
-                if (!isMounted || !isEditorActiveRef.current || coldStartRetryVersion !== currentVersion) break;
-                const count = await fetchWindowsRef.current();
-                if (count > 0) {
-                  setTimeout(() => syncActiveTabRef.current(), 50);
-                  break;
-                }
-              }
-            }
+            // Cold-start retry is handled by window_registry on the backend:
+            // if editors are running but windows haven't appeared yet, the
+            // registry schedules retries and emits "windows:snapshot" when they
+            // arrive. The snapshot listener in useEditorWindows picks it up.
           }
         } else {
           isEditorActiveRef.current = false;

@@ -396,9 +396,9 @@ describe("useEditorWindows", () => {
       expect(result.current.activeIndex).toBe(1);
     });
 
-    it("sets up windows-changed listener", async () => {
+    it("sets up windows:snapshot listener", async () => {
       const { listeners } = setup();
-      await waitFor(() => expect(listeners.has("windows-changed")).toBe(true));
+      await waitFor(() => expect(listeners.has("windows:snapshot")).toBe(true));
     });
 
     it("cleans up listeners on unmount", async () => {

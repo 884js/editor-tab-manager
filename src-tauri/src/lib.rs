@@ -6,6 +6,7 @@ mod editor_config;
 mod notification;
 mod observer;
 mod window_offset;
+mod window_registry;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconId};
@@ -59,6 +60,16 @@ fn maximize_editor_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) 
 #[tauri::command]
 fn get_all_editor_windows() -> Vec<EditorWindow> {
     editor::get_all_editor_windows()
+}
+
+#[tauri::command]
+fn get_windows_snapshot() -> Vec<EditorWindow> {
+    window_registry::snapshot()
+}
+
+#[tauri::command]
+fn request_windows_refresh() {
+    window_registry::request_refresh("manual");
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -245,6 +256,8 @@ pub fn run() {
             // Editor commands with bundle_id support
             get_editor_windows,
             get_all_editor_windows,
+            get_windows_snapshot,
+            request_windows_refresh,
             get_editor_state,
             focus_editor_window,
             open_new_editor,
@@ -326,11 +339,17 @@ pub fn run() {
                 eprintln!("Failed to setup shortcuts: {}", e);
             }
 
+            // Initialize window registry (single source of truth for windows)
+            window_registry::init(app.handle().clone());
+
             // Initialize AX observer system
             ax_observer::init(app.handle().clone());
 
             // Start NSWorkspace observer for app activation events
             observer::start_observer(app.handle().clone());
+
+            // Initial snapshot — populate registry and emit once on startup
+            window_registry::request_refresh("startup");
 
             // Start Claude Code status watcher
             claude_status::start_claude_status_watcher(app.handle().clone());

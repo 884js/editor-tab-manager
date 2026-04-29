@@ -201,6 +201,39 @@ pub fn get_all_editor_windows() -> Vec<EditorWindow> {
     all_windows
 }
 
+/// Return the CGWindowID of the frontmost editor's focused window, if any.
+/// Returns None when no supported editor is frontmost, or the frontmost editor
+/// has no focused non-transient window.
+pub fn get_active_window_id() -> Option<u32> {
+    let editor_bundle_ids: Vec<&str> = EDITORS.iter().map(|e| e.bundle_id).collect();
+    let frontmost_bid = ax_helper::get_frontmost_editor_bundle_id(&editor_bundle_ids)?;
+    let config = crate::editor_config::get_editor_by_bundle_id(&frontmost_bid)?;
+    let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)?;
+    let ax_windows = ax_helper::get_windows_ax(pid).ok()?;
+    ax_windows
+        .iter()
+        .find(|(_, title, is_frontmost)| {
+            *is_frontmost && !title.is_empty() && title != "Untitled"
+        })
+        .map(|(id, _, _)| *id)
+}
+
+/// Invalidate the workspace.json / project path cache for a specific editor.
+///
+/// Called by the registry when an editor's PID changes (restart), since a
+/// restart can mean workspace.json files changed while we weren't looking.
+/// `PROJECT_PATH_CACHE` is keyed by project name (not editor_id), so we clear
+/// it entirely — cheaper than introducing an editor-tagged key and the cost
+/// of a re-read is paid at most once per editor restart.
+pub fn invalidate_path_cache_for_editor(editor_id: &str) {
+    if let Ok(mut initialized) = CACHE_INITIALIZED.lock() {
+        initialized.remove(editor_id);
+    }
+    if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
+        cache.clear();
+    }
+}
+
 /// エディタIDからworkspaceStorageディレクトリのパスを返す
 fn get_workspace_storage_dir(editor_id: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
@@ -372,7 +405,7 @@ fn extract_project_name(title: &str, config: &EditorConfig) -> String {
                 }
                 1 => {
                     if parts[0].contains(config.display_name) || parts[0] == config.app_name {
-                        "New Window".to_string()
+                        config.display_name.to_string()
                     } else {
                         parts[0].to_string()
                     }

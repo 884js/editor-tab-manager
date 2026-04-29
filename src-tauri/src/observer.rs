@@ -181,6 +181,7 @@ fn schedule_other_event(bundle_id: Option<String>, app_handle: Arc<AppHandle>) {
                     let bid = frontmost.bundleIdentifier().map(|s| s.to_string());
                     notification::remove_all_delivered_notifications();
                     ax_observer::register_all_editors();
+                    crate::window_registry::request_refresh("app-activated");
                     let payload = AppActivationPayload {
                         app_type: "editor".to_string(),
                         bundle_id: bid,
@@ -305,6 +306,7 @@ pub fn start_observer(app_handle: AppHandle) {
                 cancel_pending_other_event();
                 notification::remove_all_delivered_notifications();
                 ax_observer::register_all_editors();
+                crate::window_registry::request_refresh("app-activated");
                 let payload = AppActivationPayload {
                     app_type: "editor".to_string(),
                     bundle_id: bundle_id_str,
