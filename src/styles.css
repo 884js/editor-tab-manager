@@ -83,3 +83,8 @@ body {
 .new-group-input:focus {
   border-color: #007aff !important;
 }
+
+/* Tab bar horizontal scroll: hide scrollbar but keep scrollable */
+.tabs-scroll::-webkit-scrollbar {
+  display: none;
+}

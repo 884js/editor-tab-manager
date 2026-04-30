@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import ColorPicker from "./ColorPicker";
@@ -72,7 +72,20 @@ function TabBar(props: TabBarProps) {
   const [groupColorPickerTarget, setGroupColorPickerTarget] = useState<string | null>(null);
   const [groupColorPickerAnchorLeft, setGroupColorPickerAnchorLeft] = useState<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const tabsWrapperRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const wrapper = tabsWrapperRef.current;
+    if (!wrapper) return;
+    const activeEl = wrapper.querySelector(
+      `[data-tab-index="${activeIndex}"]`
+    ) as HTMLElement | null;
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
+  }, [activeIndex, tabs.length]);
 
   const handleDragStart = useCallback((index: number) => {
     setDraggedIndex(index);
@@ -334,7 +347,18 @@ function TabBar(props: TabBarProps) {
       <div style={styles.dragLayer} />
 
       {/* タブはその上に配置 */}
-      <div style={styles.tabsWrapper}>
+      <div
+        ref={tabsWrapperRef}
+        className="tabs-scroll"
+        style={styles.tabsWrapper}
+        onWheel={(e) => {
+          if (e.deltaY === 0 || e.shiftKey) return;
+          const el = tabsWrapperRef.current;
+          if (!el) return;
+          if (el.scrollWidth <= el.clientWidth) return;
+          el.scrollLeft += e.deltaY;
+        }}
+      >
         {sortedGroups.map((group, groupIndex) => {
           const groupTabs = groupedTabsMap.get(group.id) || [];
           const isCollapsed = collapsedGroups.has(group.id);
@@ -612,9 +636,12 @@ const styles: Record<string, React.CSSProperties> = {
     paddingLeft: "8px",
     paddingRight: "8px",
     gap: "2px",
-    overflow: "hidden",
+    overflowX: "auto" as const,
+    overflowY: "hidden" as const,
     position: "relative",
     zIndex: 1,
+    scrollbarWidth: "none" as const,
+    msOverflowStyle: "none" as const,
   },
   addButton: {
     width: "28px",

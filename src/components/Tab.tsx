@@ -88,6 +88,7 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
         onDrop(index);
       }}
       title={shortcutKey ? `${displayName} (${shortcutKey})` : displayName}
+      data-tab-index={index}
     >
       <div style={styles.tabTextContent}>
         <span style={styles.tabName}>{displayName}</span>
@@ -128,6 +129,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "200px",
     minWidth: "80px",
     gap: "6px",
+    flexShrink: 0,
   },
   tabActive: {
     background: "#484848",
