@@ -51,6 +51,7 @@ export function useAppLifecycle({
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
   const [showBranch, setShowBranch] = useState(true);
   const isInitializedRef = useRef(false);
+  const lastMonitorKeyRef = useRef<string | null>(null);
 
   // Load notification + showBranch + language settings from store
   useEffect(() => {
@@ -234,33 +235,38 @@ export function useAppLifecycle({
           new LogicalPosition((screenWidth - 600) / 2, (screenHeight - 400) / 2)
         );
       } else {
-        const monitor = await primaryMonitor();
+        const monitor = (await currentMonitor()) ?? (await primaryMonitor());
         if (!monitor) return;
         const screenWidth = monitor.size.width / monitor.scaleFactor;
+        const originX = monitor.position.x / monitor.scaleFactor;
+        const originY = monitor.position.y / monitor.scaleFactor;
+        lastMonitorKeyRef.current = `${monitor.position.x},${monitor.position.y}`;
         await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-        await appWindow.setPosition(new LogicalPosition(0, 0));
+        await appWindow.setPosition(new LogicalPosition(originX, originY));
       }
     };
 
     adjustWindowSize();
   }, [hasAccessibilityPermission, onboardingCompleted]);
 
-  // Resize tab bar to match primary monitor width
+  // Resize tab bar to match the monitor that currently hosts the window
   const resizeTabBar = useCallback(async () => {
     const appWindow = getCurrentWindow();
-    const monitor = await primaryMonitor();
-    if (monitor) {
-      const screenWidth = monitor.size.width / monitor.scaleFactor;
-      await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-      await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
-      await appWindow.setPosition(new LogicalPosition(0, 0));
-    }
+    const monitor = (await currentMonitor()) ?? (await primaryMonitor());
+    if (!monitor) return;
+    const screenWidth = monitor.size.width / monitor.scaleFactor;
+    const originX = monitor.position.x / monitor.scaleFactor;
+    const originY = monitor.position.y / monitor.scaleFactor;
+    lastMonitorKeyRef.current = `${monitor.position.x},${monitor.position.y}`;
+    await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+    await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+    await appWindow.setPosition(new LogicalPosition(originX, originY));
   }, []);
 
   const expandWindow = useCallback(async (extraHeight: number) => {
     const appWindow = getCurrentWindow();
-    const monitor = await primaryMonitor();
+    const monitor = (await currentMonitor()) ?? (await primaryMonitor());
     if (monitor) {
       const screenWidth = monitor.size.width / monitor.scaleFactor;
       const size = new LogicalSize(screenWidth, TAB_BAR_HEIGHT + extraHeight);
@@ -370,6 +376,21 @@ export function useAppLifecycle({
       cleanupFns.push(unlisten);
     };
     setupDisplayChangedListener();
+
+    const setupMovedListener = async () => {
+      const unlisten = await appWindow.onMoved(async () => {
+        if (!isMounted) return;
+        if (showAddMenuRef.current) return;
+        if (!isVisibleRef.current) return;
+        const monitor = (await currentMonitor()) ?? (await primaryMonitor());
+        if (!monitor) return;
+        const key = `${monitor.position.x},${monitor.position.y}`;
+        if (lastMonitorKeyRef.current === key) return;
+        await resizeTabBar();
+      });
+      cleanupFns.push(unlisten);
+    };
+    setupMovedListener();
 
     return () => {
       isMounted = false;
