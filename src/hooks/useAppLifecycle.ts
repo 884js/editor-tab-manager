@@ -35,6 +35,17 @@ interface UseAppLifecycleReturn {
   handleTabContextMenuClose: () => Promise<void>;
 }
 
+function getMonitorKey(monitor: Awaited<ReturnType<typeof currentMonitor>>): string | null {
+  if (!monitor) return null;
+  return [
+    monitor.position.x,
+    monitor.position.y,
+    monitor.size.width,
+    monitor.size.height,
+    monitor.scaleFactor,
+  ].join(",");
+}
+
 export function useAppLifecycle({
   fetchWindowsRef,
   syncActiveTabRef,
@@ -240,7 +251,7 @@ export function useAppLifecycle({
         const screenWidth = monitor.size.width / monitor.scaleFactor;
         const originX = monitor.position.x / monitor.scaleFactor;
         const originY = monitor.position.y / monitor.scaleFactor;
-        lastMonitorKeyRef.current = `${monitor.position.x},${monitor.position.y}`;
+        lastMonitorKeyRef.current = getMonitorKey(monitor);
         await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
         await appWindow.setPosition(new LogicalPosition(originX, originY));
@@ -258,7 +269,7 @@ export function useAppLifecycle({
     const screenWidth = monitor.size.width / monitor.scaleFactor;
     const originX = monitor.position.x / monitor.scaleFactor;
     const originY = monitor.position.y / monitor.scaleFactor;
-    lastMonitorKeyRef.current = `${monitor.position.x},${monitor.position.y}`;
+    lastMonitorKeyRef.current = getMonitorKey(monitor);
     await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
     await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
     await appWindow.setPosition(new LogicalPosition(originX, originY));
@@ -331,7 +342,7 @@ export function useAppLifecycle({
             // Wait 150ms for macOS window animation to complete
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
-          await appWindow.setPosition(new PhysicalPosition(0, 0));
+          await resizeTabBar();
           isVisibleRef.current = true;
           if (app_type === "editor") {
             await fetchWindowsRef.current();
@@ -384,7 +395,7 @@ export function useAppLifecycle({
         if (!isVisibleRef.current) return;
         const monitor = (await currentMonitor()) ?? (await primaryMonitor());
         if (!monitor) return;
-        const key = `${monitor.position.x},${monitor.position.y}`;
+        const key = getMonitorKey(monitor);
         if (lastMonitorKeyRef.current === key) return;
         await resizeTabBar();
       });

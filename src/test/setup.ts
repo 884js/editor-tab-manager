@@ -17,15 +17,18 @@ const mockAppWindow = {
   setSize: vi.fn().mockResolvedValue(undefined),
   setMaxSize: vi.fn().mockResolvedValue(undefined),
   setPosition: vi.fn().mockResolvedValue(undefined),
+  onMoved: vi.fn().mockResolvedValue(() => {}),
 };
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: vi.fn(() => mockAppWindow),
   currentMonitor: vi.fn().mockResolvedValue({
+    position: { x: 0, y: 0 },
     size: { width: 1920, height: 1080 },
     scaleFactor: 1,
   }),
   primaryMonitor: vi.fn().mockResolvedValue({
+    position: { x: 0, y: 0 },
     size: { width: 1920, height: 1080 },
     scaleFactor: 1,
   }),

@@ -1,7 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, primaryMonitor } from "@tauri-apps/api/window";
+import { currentMonitor, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { isEnabled } from "@tauri-apps/plugin-autostart";
 import { createMockStore } from "../test/setup";
 import type { AppActivationPayload } from "../types/editor";
@@ -216,7 +216,7 @@ describe("useAppLifecycle", () => {
         await result.current.resizeTabBar();
       });
 
-      expect(primaryMonitor).toHaveBeenCalled();
+      expect(currentMonitor).toHaveBeenCalled();
       expect(appWindow.setSize).toHaveBeenCalled();
       expect(appWindow.setPosition).toHaveBeenCalled();
     });
@@ -255,6 +255,45 @@ describe("useAppLifecycle", () => {
       expect(params.isEditorActiveRef.current).toBe(true);
       expect(params.currentBundleIdRef.current).toBe("com.microsoft.VSCode");
       expect(appWindow.show).toHaveBeenCalled();
+    });
+
+    it("resizes tab bar to the current monitor width on editor activation", async () => {
+      vi.mocked(invoke).mockResolvedValue(true);
+      const { result, listeners } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.hasAccessibilityPermission).toBe(true);
+        expect(result.current.onboardingCompleted).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(listeners.has("app-activated")).toBe(true);
+      });
+
+      const appWindow = getCurrentWindow();
+      vi.mocked(appWindow.setSize).mockClear();
+      vi.mocked(currentMonitor).mockResolvedValue({
+        position: { x: 0, y: 0 },
+        size: { width: 3440, height: 1440 },
+        scaleFactor: 1,
+      } as Awaited<ReturnType<typeof currentMonitor>>);
+      vi.mocked(invoke).mockResolvedValue(undefined);
+
+      await act(async () => {
+        const handler = listeners.get("app-activated")!;
+        handler({
+          payload: {
+            app_type: "editor",
+            bundle_id: "com.microsoft.VSCode",
+            is_on_primary_screen: true,
+            covers_editor: false,
+          } satisfies AppActivationPayload,
+        });
+      });
+
+      await waitFor(() => {
+        expect(appWindow.setSize).toHaveBeenCalledWith(new LogicalSize(3440, 36));
+      });
     });
 
     it("hides window on other app activation", async () => {
