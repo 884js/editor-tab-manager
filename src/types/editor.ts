@@ -22,6 +22,7 @@ export const EDITOR_DISPLAY_NAMES: Record<string, string> = {
   "com.microsoft.VSCode": "VSCode",
   "com.todesktop.230313mzl4w4u92": "Cursor",
   "dev.zed.Zed": "Zed",
+  "com.openai.codex": "Codex",
 };
 
 export const ALL_EDITOR_BUNDLE_IDS = Object.keys(EDITOR_DISPLAY_NAMES);
