@@ -47,7 +47,7 @@
   },
   "onboarding": {
     "welcomeTitle": "Editor Tab Manager へようこそ",
-    "welcomeDescription": "複数のエディタウィンドウをブラウザのタブのように管理できるデスクトップアプリです。VSCode、Cursor、Zed、Codexなどのエディタウィンドウをすばやく切り替えましょう。",
+    "welcomeDescription": "複数のエディタウィンドウをブラウザのタブのように管理できるデスクトップアプリです。VSCode、Cursor、Zed、Codex、Claudeなどのエディタウィンドウをすばやく切り替えましょう。",
     "accessibilityTitle": "アクセシビリティ権限の設定",
     "accessibilityGranted": "アクセシビリティ権限は付与済みです",
     "dontShowAgain": "今後このウィンドウを表示しない",

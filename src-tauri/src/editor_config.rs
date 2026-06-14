@@ -1,7 +1,7 @@
 /// Editor configuration for multi-editor support
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
-    pub id: &'static str,           // "vscode", "cursor", "zed", "codex"
+    pub id: &'static str,           // "vscode", "cursor", "zed", "codex", "claude"
     pub display_name: &'static str, // "Visual Studio Code", "Cursor"
     pub bundle_id: &'static str,    // macOS bundle ID
     pub app_name: &'static str,     // App name for title parsing
@@ -32,6 +32,12 @@ pub const EDITORS: &[EditorConfig] = &[
         display_name: "Codex",
         bundle_id: "com.openai.codex",
         app_name: "Codex",
+    },
+    EditorConfig {
+        id: "claude",
+        display_name: "Claude",
+        bundle_id: "com.anthropic.claudefordesktop",
+        app_name: "Claude",
     },
 ];
 
