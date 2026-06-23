@@ -56,8 +56,9 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 
 - **Tab Bar UI** - View all editor windows in an always-visible tab bar
 - **Quick Switching** - Switch tabs instantly with `Cmd+1` through `Cmd+9`
-- **Multi-Editor Support** - Works with VSCode, Cursor, and Zed
+- **Multi-Editor Support** - Works with VSCode, Cursor, Zed, Codex, and Claude
 - **Custom Tab Order** - Drag and drop to reorder tabs; order persists across restarts
+- **Custom Tab Colors** - Right-click a tab to assign a color for visual grouping
 - **Claude Code Integration** - Badge notifications for Claude Code task status
 - **Desktop Notifications** - Get notified when Claude Code finishes generating while you're in another project
 - **Multi-language Support** - Japanese and English UI with automatic system language detection
@@ -69,6 +70,8 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 | Visual Studio Code | ✅ Supported |
 | Cursor | ✅ Supported |
 | Zed | ✅ Supported |
+| Codex | ✅ Supported |
+| Claude | ✅ Supported |
 
 ## Installation
 
@@ -185,7 +188,7 @@ This integration lets you monitor Claude Code status at a glance, even while wor
 
 > **Note**: Notifications are only sent when the editor is in the background. If the editor is already in the foreground, only the badge is updated.
 
-**Supported editors**: VSCode, Cursor (as Claude Code execution environments)
+**Badge matching**: Badges are matched to tabs by project folder name, so they appear on whichever editor window (VSCode, Cursor, or Zed) has the matching project open.
 
 ### Settings
 
@@ -224,12 +227,13 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 ├── src/                    # Frontend (React + TypeScript)
 │   ├── App.tsx            # Main component
 │   ├── components/        # UI components
-│   ├── hooks/             # Custom hooks (useLanguage)
+│   ├── hooks/             # Custom hooks (window state, Claude status, etc.)
 │   └── i18n/              # i18next config and locale files (ja/en)
 ├── src-tauri/             # Backend (Rust + Tauri)
 │   └── src/
 │       ├── lib.rs         # Tauri setup, commands
 │       ├── editor.rs      # Window detection/manipulation
+│       ├── editor_config.rs # Editor definitions (add editors here)
 │       ├── observer.rs    # App activation observer
 │       ├── claude_status.rs # Claude Code integration
 │       └── notification.rs  # Desktop notification handling
