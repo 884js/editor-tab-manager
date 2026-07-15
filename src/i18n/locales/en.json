@@ -9,6 +9,11 @@
     "newEditorTooltip": "Open new editor window (Cmd+Shift+T)",
     "closeTooltip": "Close (Cmd+W)"
   },
+  "worktree": {
+    "openBranches": "Open {{name}} branches",
+    "branchList": "{{name}} branches",
+    "closeBranch": "Close {{branch}}"
+  },
   "settings": {
     "title": "Settings",
     "claudeIntegration": "Claude Code Integration",

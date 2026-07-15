@@ -229,6 +229,8 @@ fn windows_differ(a: &[EditorWindow], b: &[EditorWindow]) -> bool {
                 || wa.name != wb.name
                 || wa.branch != wb.branch
                 || wa.path != wb.path
+                || wa.repository_id != wb.repository_id
+                || wa.repository_name != wb.repository_name
                 || wa.bundle_id != wb.bundle_id
         })
 }
@@ -243,6 +245,8 @@ mod tests {
             name: name.to_string(),
             path: String::new(),
             branch: None,
+            repository_id: None,
+            repository_name: None,
             bundle_id: bundle.to_string(),
             editor_name: String::new(),
         }
@@ -283,6 +287,8 @@ mod tests {
             name: "p".into(),
             path: String::new(),
             branch: Some("main".into()),
+            repository_id: None,
+            repository_name: None,
             bundle_id: "b1".into(),
             editor_name: String::new(),
         }];
@@ -291,6 +297,8 @@ mod tests {
             name: "p".into(),
             path: String::new(),
             branch: Some("dev".into()),
+            repository_id: None,
+            repository_name: None,
             bundle_id: "b1".into(),
             editor_name: String::new(),
         }];

@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
+import WorktreeTab from "./WorktreeTab";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
 import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
 import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
+import { groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
 
 interface TabBarProps {
   tabs: EditorWindow[];
@@ -41,6 +43,8 @@ interface TabBarProps {
   onSetGroupColor: (groupId: string, colorId: string | null) => void;
   onTabContextMenuOpen: () => Promise<void>;
   onTabContextMenuClose: () => Promise<void>;
+  onWorktreeMenuOpen: (rowCount: number) => Promise<void>;
+  onWorktreeMenuClose: () => Promise<void>;
 }
 
 const toRgba = (rgb: { r: number; g: number; b: number }, alpha: number) =>
@@ -55,7 +59,7 @@ const getClaudeStatusForTab = (tab: EditorWindow, statuses?: Record<string, Clau
 };
 
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabToGroup, onUnassignTabFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabToGroup, onUnassignTabFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
@@ -338,6 +342,33 @@ function TabBar(props: TabBarProps) {
     />
   );
 
+  const renderRepositoryTabs = (entries: TabEntry[]) => groupRepositoryTabs(entries).map((item) => {
+    if (item.type === "tab") {
+      return renderTab(item.entry.tab, item.entry.originalIndex);
+    }
+
+    const statuses = new Map(
+      item.entries.map(({ tab, originalIndex }) => [
+        originalIndex,
+        getClaudeStatusForTab(tab, claudeStatuses),
+      ]),
+    );
+    return (
+      <WorktreeTab
+        key={item.key}
+        name={item.name}
+        entries={item.entries}
+        activeIndex={activeIndex}
+        statuses={statuses}
+        onTabClick={handleTabClick}
+        onCloseTab={handleCloseTab}
+        onMenuOpen={onWorktreeMenuOpen}
+        onMenuClose={onWorktreeMenuClose}
+        onContextMenu={handleTabContextMenu}
+      />
+    );
+  });
+
   return (
     <div ref={containerRef} style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
@@ -421,13 +452,13 @@ function TabBar(props: TabBarProps) {
               )}
 
               {/* Group tabs (hidden when collapsed) */}
-              {!isCollapsed && groupTabs.map(({ tab, originalIndex }) => renderTab(tab, originalIndex))}
+              {!isCollapsed && renderRepositoryTabs(groupTabs)}
             </div>
           );
         })}
 
         {/* Ungrouped tabs */}
-        {ungroupedTabs.map(({ tab, originalIndex }) => renderTab(tab, originalIndex))}
+        {renderRepositoryTabs(ungroupedTabs)}
 
         <button
           ref={addButtonRef}

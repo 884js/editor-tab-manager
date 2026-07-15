@@ -221,6 +221,22 @@ describe("useAppLifecycle", () => {
       expect(appWindow.setPosition).toHaveBeenCalled();
     });
 
+    it("expands the worktree menu to match its row count", async () => {
+      const appWindow = getCurrentWindow();
+      const { result } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+      });
+      vi.mocked(appWindow.setSize).mockClear();
+
+      await act(async () => {
+        await result.current.handleWorktreeMenuOpen(3);
+      });
+
+      expect(appWindow.setSize).toHaveBeenLastCalledWith(new LogicalSize(1920, 140));
+    });
+
   });
 
   describe("app-activated event", () => {

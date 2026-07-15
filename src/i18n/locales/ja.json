@@ -9,6 +9,11 @@
     "newEditorTooltip": "新しいエディタウィンドウを開く (Cmd+Shift+T)",
     "closeTooltip": "閉じる (Cmd+W)"
   },
+  "worktree": {
+    "openBranches": "{{name}}のブランチを開く",
+    "branchList": "{{name}}のブランチ",
+    "closeBranch": "{{branch}}を閉じる"
+  },
   "settings": {
     "title": "設定",
     "claudeIntegration": "Claude Code 連携",

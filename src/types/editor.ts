@@ -6,6 +6,8 @@ export interface EditorWindow {
   name: string;
   path: string;
   branch?: string;
+  repository_id?: string;
+  repository_name?: string;
   bundle_id: string;
   editor_name: string;
 }

@@ -22,6 +22,8 @@ pub struct EditorWindow {
     pub name: String,
     pub path: String,
     pub branch: Option<String>,  // Git branch name
+    pub repository_id: Option<String>,
+    pub repository_name: Option<String>,
     pub bundle_id: String,       // Editor's macOS bundle ID
     pub editor_name: String,     // Editor display name (e.g. "Visual Studio Code")
 }
@@ -113,9 +115,9 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
         let name = extract_project_name(title, config);
 
         let resolved_path = resolve_project_path(&name, config.id, pid, *window_id);
-        let branch = resolved_path.as_ref()
-            .and_then(|path| find_git_root(path).or(Some(path.clone())))
-            .and_then(|git_root| get_git_branch(&git_root));
+        let git_root = resolved_path.as_ref().and_then(|path| find_git_root(path));
+        let branch = git_root.as_ref().and_then(|root| get_git_branch(root));
+        let repository = git_root.as_ref().and_then(|root| get_repository_info(root));
         let path_str = resolved_path
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -125,6 +127,8 @@ pub fn get_editor_state_with_config(config: &EditorConfig) -> EditorState {
             name,
             path: path_str,
             branch,
+            repository_id: repository.as_ref().map(|(id, _)| id.clone()),
+            repository_name: repository.map(|(_, name)| name),
             bundle_id: config.bundle_id.to_string(),
             editor_name: config.display_name.to_string(),
         });
@@ -176,9 +180,9 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
             let name = extract_project_name(title, config);
 
             let resolved_path = resolve_project_path(&name, config.id, pid, *window_id);
-            let branch = resolved_path.as_ref()
-                .and_then(|path| find_git_root(path).or(Some(path.clone())))
-                .and_then(|git_root| get_git_branch(&git_root));
+            let git_root = resolved_path.as_ref().and_then(|path| find_git_root(path));
+            let branch = git_root.as_ref().and_then(|root| get_git_branch(root));
+            let repository = git_root.as_ref().and_then(|root| get_repository_info(root));
             let path_str = resolved_path
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
@@ -188,6 +192,8 @@ pub fn get_editor_windows_with_config(config: &EditorConfig) -> Vec<EditorWindow
                 name,
                 path: path_str,
                 branch,
+                repository_id: repository.as_ref().map(|(id, _)| id.clone()),
+                repository_name: repository.map(|(_, name)| name),
                 bundle_id: config.bundle_id.to_string(),
                 editor_name: config.display_name.to_string(),
             })
@@ -513,6 +519,40 @@ fn resolve_git_dir(git_root: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
+/// Resolve the shared Git directory so linked worktrees use one repository identity.
+fn resolve_git_common_dir(git_root: &Path) -> Option<PathBuf> {
+    let git_dir = resolve_git_dir(git_root)?;
+    let common_dir_file = git_dir.join("commondir");
+    let common_dir = if common_dir_file.is_file() {
+        let content = std::fs::read_to_string(common_dir_file).ok()?;
+        let path = Path::new(content.trim());
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            git_dir.join(path)
+        }
+    } else {
+        git_dir
+    };
+
+    std::fs::canonicalize(common_dir).ok()
+}
+
+fn get_repository_info(git_root: &Path) -> Option<(String, String)> {
+    let common_dir = resolve_git_common_dir(git_root)?;
+    let repository_name = if common_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some(".git")
+    {
+        common_dir.parent()?.file_name()?.to_str()?.to_string()
+    } else {
+        git_root.file_name()?.to_str()?.to_string()
+    };
+
+    Some((common_dir.to_string_lossy().to_string(), repository_name))
+}
+
 /// Read .git/HEAD to get current branch name
 /// Returns branch name for normal branches, short commit hash for detached HEAD
 /// Supports both regular repos and submodules
@@ -721,6 +761,46 @@ mod tests {
         let result = resolve_git_dir(&sub);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), std::fs::canonicalize(&actual_git).unwrap());
+    }
+
+    #[test]
+    fn linked_worktree_uses_main_repository_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("project");
+        let main_git = main.join(".git");
+        let worktree_git = main_git.join("worktrees/feature");
+        fs::create_dir_all(&worktree_git).unwrap();
+
+        let worktree = tmp.path().join("project-feature");
+        fs::create_dir(&worktree).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_git.display()),
+        )
+        .unwrap();
+        fs::write(worktree_git.join("commondir"), "../..\n").unwrap();
+
+        let main_info = get_repository_info(&main).unwrap();
+        let worktree_info = get_repository_info(&worktree).unwrap();
+
+        assert_eq!(main_info, worktree_info);
+        assert_eq!(main_info.1, "project");
+    }
+
+    #[test]
+    fn separate_repositories_use_different_identities() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        fs::create_dir_all(first.join(".git")).unwrap();
+        fs::create_dir_all(second.join(".git")).unwrap();
+
+        let first_info = get_repository_info(&first).unwrap();
+        let second_info = get_repository_info(&second).unwrap();
+
+        assert_ne!(first_info.0, second_info.0);
+        assert_eq!(first_info.1, "first");
+        assert_eq!(second_info.1, "second");
     }
 
     #[test]

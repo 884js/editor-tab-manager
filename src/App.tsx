@@ -137,6 +137,8 @@ function App() {
       onSetGroupColor={editorWindows.setGroupColor}
       onTabContextMenuOpen={lifecycle.handleTabContextMenuOpen}
       onTabContextMenuClose={lifecycle.handleTabContextMenuClose}
+      onWorktreeMenuOpen={lifecycle.handleWorktreeMenuOpen}
+      onWorktreeMenuClose={lifecycle.handleWorktreeMenuClose}
     />
   );
 }
