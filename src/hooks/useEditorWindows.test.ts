@@ -463,6 +463,36 @@ describe("useEditorWindows", () => {
       expect(result.current.groupAssignments[key]).toBeNull();
       expect(mockSaveGroupAssignments).toHaveBeenLastCalledWith({ [key]: null });
     });
+
+    it("updates repository window assignments in one batch", () => {
+      const { result } = setup();
+      const keys = [
+        "com.microsoft.VSCode:/worktrees/project",
+        "com.todesktop.230313mzl4w4u92:/projects/project",
+      ];
+
+      act(() => {
+        result.current.assignTabsToGroup(keys, "group-a");
+      });
+
+      expect(result.current.groupAssignments).toMatchObject({
+        [keys[0]]: "group-a",
+        [keys[1]]: "group-a",
+      });
+      expect(mockSaveGroupAssignments).toHaveBeenLastCalledWith({
+        [keys[0]]: "group-a",
+        [keys[1]]: "group-a",
+      });
+
+      act(() => {
+        result.current.unassignTabsFromGroup(keys);
+      });
+
+      expect(result.current.groupAssignments).toMatchObject({
+        [keys[0]]: null,
+        [keys[1]]: null,
+      });
+    });
   });
 
   describe("event listeners", () => {

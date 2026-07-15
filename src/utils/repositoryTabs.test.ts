@@ -1,5 +1,9 @@
 import type { EditorWindow } from "../types/editor";
-import { groupRepositoryTabs, type TabEntry } from "./repositoryTabs";
+import {
+  getInheritedRepositoryGroupId,
+  groupRepositoryTabs,
+  type TabEntry,
+} from "./repositoryTabs";
 
 function makeEntry(index: number, overrides: Partial<EditorWindow> = {}): TabEntry {
   return {
@@ -19,7 +23,7 @@ function makeEntry(index: number, overrides: Partial<EditorWindow> = {}): TabEnt
 }
 
 describe("groupRepositoryTabs", () => {
-  it("groups worktrees from the same repository and editor", () => {
+  it("groups worktrees from the same repository", () => {
     const result = groupRepositoryTabs([makeEntry(0), makeEntry(1)]);
 
     expect(result).toHaveLength(1);
@@ -35,13 +39,17 @@ describe("groupRepositoryTabs", () => {
     expect(groupRepositoryTabs([entry])).toEqual([{ type: "tab", entry }]);
   });
 
-  it("does not group the same repository across different editors", () => {
+  it("groups the same repository across different editors", () => {
     const result = groupRepositoryTabs([
       makeEntry(0),
       makeEntry(1, { bundle_id: "com.todesktop.230313mzl4w4u92" }),
     ]);
 
-    expect(result.map((item) => item.type)).toEqual(["tab", "tab"]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: "repository",
+      entries: [{ originalIndex: 0 }, { originalIndex: 1 }],
+    });
   });
 
   it("does not group different repositories", () => {
@@ -62,5 +70,29 @@ describe("groupRepositoryTabs", () => {
 
     expect(result[0]).toEqual({ type: "tab", entry: standalone });
     expect(result[1]).toMatchObject({ type: "repository", entries: [firstWorktree, secondWorktree] });
+  });
+});
+
+describe("getInheritedRepositoryGroupId", () => {
+  const entries = [makeEntry(0), makeEntry(1)];
+
+  it("inherits the only assigned manual group", () => {
+    const result = getInheritedRepositoryGroupId(entries, ({ originalIndex }) =>
+      originalIndex === 0 ? "medii" : null
+    );
+
+    expect(result).toBe("medii");
+  });
+
+  it("stays ungrouped when child assignments conflict", () => {
+    const result = getInheritedRepositoryGroupId(entries, ({ originalIndex }) =>
+      originalIndex === 0 ? "medii" : "personal"
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it("stays ungrouped when no child is assigned", () => {
+    expect(getInheritedRepositoryGroupId(entries, () => null)).toBeNull();
   });
 });

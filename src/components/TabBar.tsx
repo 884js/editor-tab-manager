@@ -7,7 +7,7 @@ import AddTabMenu from "./AddTabMenu";
 import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
 import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
-import { groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
+import { getInheritedRepositoryGroupId, groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
 
 interface TabBarProps {
   tabs: EditorWindow[];
@@ -35,8 +35,8 @@ interface TabBarProps {
   onAddGroup: (name: string) => string;
   onUpdateGroup: (groupId: string, name: string) => void;
   onDeleteGroup: (groupId: string) => void;
-  onAssignTabToGroup: (wKey: string, groupId: string) => void;
-  onUnassignTabFromGroup: (wKey: string) => void;
+  onAssignTabsToGroup: (wKeys: string[], groupId: string) => void;
+  onUnassignTabsFromGroup: (wKeys: string[]) => void;
   onToggleGroupCollapse: (groupId: string) => void;
   onReorderGroups: (fromIndex: number, toIndex: number) => void;
   groupColors: Record<string, string>;
@@ -59,7 +59,7 @@ const getClaudeStatusForTab = (tab: EditorWindow, statuses?: Record<string, Clau
 };
 
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabToGroup, onUnassignTabFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
@@ -68,7 +68,7 @@ function TabBar(props: TabBarProps) {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
   const [draggedGroupIndex, setDraggedGroupIndex] = useState<number | null>(null);
-  const [tabContextMenu, setTabContextMenu] = useState<{ index: number; x: number; y: number; rect: DOMRect } | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<{ index: number; indices: number[]; x: number; y: number; rect: DOMRect } | null>(null);
   const [groupSubmenuOpen, setGroupSubmenuOpen] = useState(false);
   const [newGroupInput, setNewGroupInput] = useState<string | null>(null);
   const [groupColorPickerTarget, setGroupColorPickerTarget] = useState<string | null>(null);
@@ -112,7 +112,22 @@ function TabBar(props: TabBarProps) {
 
   const handleTabContextMenu = useCallback(async (index: number, rect: DOMRect) => {
     await onTabContextMenuOpen();
-    setTabContextMenu({ index, x: rect.left, y: rect.bottom, rect });
+    setTabContextMenu({ index, indices: [index], x: rect.left, y: rect.bottom, rect });
+  }, [onTabContextMenuOpen]);
+
+  const handleWorktreeContextMenu = useCallback(async (
+    indices: number[],
+    preferredIndex: number,
+    rect: DOMRect,
+  ) => {
+    await onTabContextMenuOpen();
+    setTabContextMenu({
+      index: preferredIndex,
+      indices,
+      x: rect.left,
+      y: rect.bottom,
+      rect,
+    });
   }, [onTabContextMenuOpen]);
 
   const handleOpenColorPicker = useCallback(async () => {
@@ -155,35 +170,38 @@ function TabBar(props: TabBarProps) {
 
   const handleAssignToGroup = useCallback((groupId: string) => {
     if (tabContextMenu) {
-      const tab = tabs[tabContextMenu.index];
-      if (tab) {
-        onAssignTabToGroup(windowKey(tab), groupId);
-      }
+      const keys = tabContextMenu.indices
+        .map((index) => tabs[index])
+        .filter((tab): tab is EditorWindow => Boolean(tab))
+        .map(windowKey);
+      onAssignTabsToGroup(keys, groupId);
     }
     closeTabContextMenu();
-  }, [tabContextMenu, tabs, onAssignTabToGroup, closeTabContextMenu]);
+  }, [tabContextMenu, tabs, onAssignTabsToGroup, closeTabContextMenu]);
 
   const handleUnassignFromGroup = useCallback(() => {
     if (tabContextMenu) {
-      const tab = tabs[tabContextMenu.index];
-      if (tab) {
-        onUnassignTabFromGroup(windowKey(tab));
-      }
+      const keys = tabContextMenu.indices
+        .map((index) => tabs[index])
+        .filter((tab): tab is EditorWindow => Boolean(tab))
+        .map(windowKey);
+      onUnassignTabsFromGroup(keys);
     }
     closeTabContextMenu();
-  }, [tabContextMenu, tabs, onUnassignTabFromGroup, closeTabContextMenu]);
+  }, [tabContextMenu, tabs, onUnassignTabsFromGroup, closeTabContextMenu]);
 
   const handleCreateNewGroup = useCallback(() => {
     if (newGroupInput !== null && newGroupInput.trim() && tabContextMenu) {
       const groupId = onAddGroup(newGroupInput.trim());
-      const tab = tabs[tabContextMenu.index];
-      if (tab) {
-        onAssignTabToGroup(windowKey(tab), groupId);
-      }
+      const keys = tabContextMenu.indices
+        .map((index) => tabs[index])
+        .filter((tab): tab is EditorWindow => Boolean(tab))
+        .map(windowKey);
+      onAssignTabsToGroup(keys, groupId);
     }
     setNewGroupInput(null);
     closeTabContextMenu();
-  }, [newGroupInput, onAddGroup, tabContextMenu, tabs, onAssignTabToGroup, closeTabContextMenu]);
+  }, [newGroupInput, onAddGroup, tabContextMenu, tabs, onAssignTabsToGroup, closeTabContextMenu]);
 
   // Group label context menu
   const handleGroupLabelContextMenu = useCallback(async (e: React.MouseEvent, groupId: string) => {
@@ -267,9 +285,25 @@ function TabBar(props: TabBarProps) {
     const groupIds = new Set(groups.map((g) => g.id));
     const grouped = new Map<string, { tab: EditorWindow; originalIndex: number }[]>();
     const ungrouped: { tab: EditorWindow; originalIndex: number }[] = [];
+    const allEntries = tabs.map((tab, originalIndex) => ({ tab, originalIndex }));
+    const repositoryGroupByIndex = new Map<number, string | null>();
+
+    for (const item of groupRepositoryTabs(allEntries)) {
+      if (item.type !== "repository") continue;
+      const inheritedGroupId = getInheritedRepositoryGroupId(item.entries, ({ tab }) => {
+        const groupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
+        return groupId && groupIds.has(groupId) ? groupId : null;
+      });
+      for (const { originalIndex } of item.entries) {
+        repositoryGroupByIndex.set(originalIndex, inheritedGroupId);
+      }
+    }
 
     tabs.forEach((tab, index) => {
-      const groupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
+      const assignedGroupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
+      const groupId = repositoryGroupByIndex.has(index)
+        ? repositoryGroupByIndex.get(index)
+        : assignedGroupId;
       if (groupId && groupIds.has(groupId)) {
         if (!grouped.has(groupId)) {
           grouped.set(groupId, []);
@@ -364,7 +398,7 @@ function TabBar(props: TabBarProps) {
         onCloseTab={handleCloseTab}
         onMenuOpen={onWorktreeMenuOpen}
         onMenuClose={onWorktreeMenuClose}
-        onContextMenu={handleTabContextMenu}
+        onContextMenu={handleWorktreeContextMenu}
       />
     );
   });
@@ -578,11 +612,14 @@ function TabBar(props: TabBarProps) {
                       {t("group.createNew")}
                     </button>
                   )}
-                  {tabContextMenu && tabs[tabContextMenu.index] && getWindowScopedValue(
-                    groupAssignments,
-                    tabs[tabContextMenu.index],
-                    legacyWindowKey(tabs[tabContextMenu.index]),
-                  ) && (
+                  {tabContextMenu && tabContextMenu.indices.some((index) => {
+                    const tab = tabs[index];
+                    return tab && getWindowScopedValue(
+                      groupAssignments,
+                      tab,
+                      legacyWindowKey(tab),
+                    );
+                  }) && (
                     <>
                       <div style={styles.contextMenuSeparator} />
                       <button

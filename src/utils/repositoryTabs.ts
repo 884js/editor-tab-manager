@@ -11,7 +11,19 @@ export type RepositoryTabItem =
 
 function repositoryKey(tab: EditorWindow): string | null {
   if (!tab.repository_id) return null;
-  return `${tab.bundle_id}:${tab.repository_id}`;
+  return tab.repository_id;
+}
+
+export function getInheritedRepositoryGroupId(
+  entries: TabEntry[],
+  getGroupId: (entry: TabEntry) => string | null | undefined,
+): string | null {
+  const groupIds = new Set(
+    entries
+      .map(getGroupId)
+      .filter((groupId): groupId is string => Boolean(groupId)),
+  );
+  return groupIds.size === 1 ? [...groupIds][0] : null;
 }
 
 export function groupRepositoryTabs(entries: TabEntry[]): RepositoryTabItem[] {

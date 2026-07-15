@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import type { ClaudeStatus } from "../types/editor";
+import { EDITOR_DISPLAY_NAMES, type ClaudeStatus } from "../types/editor";
 import type { TabEntry } from "../utils/repositoryTabs";
 
 interface WorktreeTabProps {
@@ -13,11 +13,10 @@ interface WorktreeTabProps {
   onCloseTab: (index: number) => void;
   onMenuOpen: (rowCount: number) => Promise<void>;
   onMenuClose: () => Promise<void>;
-  onContextMenu?: (index: number, rect: DOMRect) => void;
+  onContextMenu?: (indices: number[], preferredIndex: number, rect: DOMRect) => void;
 }
 
-const CLOSE_DELAY_MS = 200;
-const MENU_WIDTH = 240;
+const MENU_WIDTH = 280;
 
 function WorktreeTab({
   name,
@@ -32,36 +31,25 @@ function WorktreeTab({
 }: WorktreeTabProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ left: 8, top: 36 });
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const isOpenRef = useRef(false);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeEntry = entries.find((entry) => entry.originalIndex === activeIndex);
   const contextEntry = activeEntry ?? entries[0];
   const isActive = Boolean(activeEntry);
+  const showEditorNames = new Set(entries.map((entry) => entry.tab.bundle_id)).size > 1;
   const hasWaiting = entries.some((entry) => statuses.get(entry.originalIndex) === "waiting");
   const hasGenerating = entries.some((entry) => statuses.get(entry.originalIndex) === "generating");
 
-  const cancelClose = useCallback(() => {
-    if (closeTimerRef.current) {
-      clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, []);
-
   const closeMenu = useCallback(() => {
-    cancelClose();
     if (!isOpen) return;
     setIsOpen(false);
-    setIsPinned(false);
     void onMenuClose();
-  }, [cancelClose, isOpen, onMenuClose]);
+  }, [isOpen, onMenuClose]);
 
   const openMenu = useCallback(() => {
-    cancelClose();
     const rect = rootRef.current?.getBoundingClientRect();
     if (rect) {
       const maxLeft = Math.max(8, window.innerWidth - MENU_WIDTH - 8);
@@ -71,22 +59,15 @@ function WorktreeTab({
       setIsOpen(true);
       void onMenuOpen(entries.length);
     }
-  }, [cancelClose, entries.length, isOpen, onMenuOpen]);
-
-  const scheduleClose = useCallback(() => {
-    cancelClose();
-    if (isPinned) return;
-    closeTimerRef.current = setTimeout(closeMenu, CLOSE_DELAY_MS);
-  }, [cancelClose, closeMenu, isPinned]);
+  }, [entries.length, isOpen, onMenuOpen]);
 
   useEffect(() => {
     isOpenRef.current = isOpen;
   }, [isOpen]);
 
   useEffect(() => () => {
-    cancelClose();
     if (isOpenRef.current) void onMenuClose();
-  }, [cancelClose, onMenuClose]);
+  }, [onMenuClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -104,8 +85,6 @@ function WorktreeTab({
     <div
       ref={rootRef}
       style={styles.root}
-      onMouseEnter={openMenu}
-      onMouseLeave={scheduleClose}
       onKeyDown={(event) => {
         if (event.key === "Escape" && isOpen) {
           event.stopPropagation();
@@ -122,19 +101,20 @@ function WorktreeTab({
           ...(isActive ? styles.tabActive : {}),
         }}
         onClick={() => {
-          if (isOpen && isPinned) {
+          if (isOpen) {
             closeMenu();
             return;
           }
-          setIsPinned(true);
           openMenu();
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          cancelClose();
           setIsOpen(false);
-          setIsPinned(false);
-          onContextMenu?.(contextEntry.originalIndex, event.currentTarget.getBoundingClientRect());
+          onContextMenu?.(
+            entries.map((entry) => entry.originalIndex),
+            contextEntry.originalIndex,
+            event.currentTarget.getBoundingClientRect(),
+          );
         }}
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -155,8 +135,6 @@ function WorktreeTab({
           aria-label={t("worktree.branchList", { name })}
           data-worktree-menu={`${contextEntry.tab.bundle_id}:${contextEntry.tab.repository_id}`}
           style={{ ...styles.menu, left: menuPosition.left, top: menuPosition.top }}
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
         >
           {entries.map(({ tab, originalIndex }) => {
             const status = statuses.get(originalIndex);
@@ -176,6 +154,11 @@ function WorktreeTab({
                 >
                   <span aria-hidden="true" style={styles.activeMarker}>{rowActive ? "●" : ""}</span>
                   <span style={styles.branchName}>⑂ {branchName}</span>
+                  {showEditorNames && (
+                    <span style={styles.editorName}>
+                      {EDITOR_DISPLAY_NAMES[tab.bundle_id] || tab.editor_name}
+                    </span>
+                  )}
                   {status === "waiting" && <span style={styles.badgeWaiting} />}
                   {status === "generating" && <span style={styles.badgeGenerating} className="pulse-animation" />}
                 </button>
@@ -312,6 +295,11 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontSize: "12px",
+  },
+  editorName: {
+    flexShrink: 0,
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: "10px",
   },
   closeButton: {
     display: "flex",

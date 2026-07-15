@@ -61,6 +61,8 @@ interface UseEditorWindowsReturn {
   deleteGroup: (groupId: string) => void;
   assignTabToGroup: (wKey: string, groupId: string) => void;
   unassignTabFromGroup: (wKey: string) => void;
+  assignTabsToGroup: (wKeys: string[], groupId: string) => void;
+  unassignTabsFromGroup: (wKeys: string[]) => void;
   toggleGroupCollapse: (groupId: string) => void;
   reorderGroups: (fromIndex: number, toIndex: number) => void;
   setGroupColor: (groupId: string, colorId: string | null) => void;
@@ -350,21 +352,33 @@ export function useEditorWindows({
     });
   }, []);
 
-  const assignTabToGroup = useCallback((wKey: string, groupId: string) => {
+  const assignTabsToGroup = useCallback((wKeys: string[], groupId: string) => {
     setGroupAssignments((prev) => {
-      const next = { ...prev, [wKey]: groupId };
+      const next = { ...prev };
+      for (const wKey of wKeys) next[wKey] = groupId;
       saveGroupAssignments(next);
       return next;
     });
   }, []);
 
-  const unassignTabFromGroup = useCallback((wKey: string) => {
+  const unassignTabsFromGroup = useCallback((wKeys: string[]) => {
     setGroupAssignments((prev) => {
-      const next = { ...prev, [wKey]: null };
+      const next = { ...prev };
+      for (const wKey of wKeys) next[wKey] = null;
       saveGroupAssignments(next);
       return next;
     });
   }, []);
+
+  const assignTabToGroup = useCallback(
+    (wKey: string, groupId: string) => assignTabsToGroup([wKey], groupId),
+    [assignTabsToGroup],
+  );
+
+  const unassignTabFromGroup = useCallback(
+    (wKey: string) => unassignTabsFromGroup([wKey]),
+    [unassignTabsFromGroup],
+  );
 
   const toggleGroupCollapse = useCallback((groupId: string) => {
     setCollapsedGroups((prev) => {
@@ -668,6 +682,8 @@ export function useEditorWindows({
     deleteGroup,
     assignTabToGroup,
     unassignTabFromGroup,
+    assignTabsToGroup,
+    unassignTabsFromGroup,
     toggleGroupCollapse,
     reorderGroups,
     setGroupColor,

@@ -1,9 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { EditorWindow } from "../types/editor";
 import type { TabEntry } from "../utils/repositoryTabs";
 import WorktreeTab from "./WorktreeTab";
 
-function makeEntry(index: number, branch: string): TabEntry {
+function makeEntry(index: number, branch: string, overrides: Partial<EditorWindow> = {}): TabEntry {
   const tab: EditorWindow = {
     id: index + 1,
     name: "project",
@@ -13,6 +13,7 @@ function makeEntry(index: number, branch: string): TabEntry {
     repository_name: "project",
     bundle_id: "com.microsoft.VSCode",
     editor_name: "VSCode",
+    ...overrides,
   };
   return { tab, originalIndex: index };
 }
@@ -20,13 +21,20 @@ function makeEntry(index: number, branch: string): TabEntry {
 function setup() {
   const props = {
     name: "project",
-    entries: [makeEntry(2, "main"), makeEntry(5, "feature/search")],
+    entries: [
+      makeEntry(2, "main"),
+      makeEntry(5, "feature/search", {
+        bundle_id: "com.todesktop.230313mzl4w4u92",
+        editor_name: "Cursor",
+      }),
+    ],
     activeIndex: 5,
     statuses: new Map([[2, "waiting" as const], [5, "generating" as const]]),
     onTabClick: vi.fn(),
     onCloseTab: vi.fn(),
     onMenuOpen: vi.fn().mockResolvedValue(undefined),
     onMenuClose: vi.fn().mockResolvedValue(undefined),
+    onContextMenu: vi.fn(),
   };
   const view = render(<WorktreeTab {...props} />);
   const trigger = screen.getByRole("button", { name: "worktree.openBranches" });
@@ -34,24 +42,34 @@ function setup() {
 }
 
 describe("WorktreeTab", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  it("shows branch rows on click and expands for their count", () => {
+    const { props, trigger } = setup();
 
-  it("shows branch rows on hover and expands for their count", () => {
-    const { props, root } = setup();
-
-    fireEvent.mouseEnter(root);
+    fireEvent.click(trigger);
 
     expect(screen.getByRole("menu", { name: "worktree.branchList" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
+    expect(screen.getByText("VSCode")).toBeInTheDocument();
+    expect(screen.getByText("Cursor")).toBeInTheDocument();
     expect(props.onMenuOpen).toHaveBeenCalledWith(2);
   });
 
+  it("opens the parent context menu for every repository window", () => {
+    const { props, trigger } = setup();
+
+    fireEvent.contextMenu(trigger);
+
+    expect(props.onContextMenu).toHaveBeenCalledWith(
+      [2, 5],
+      5,
+      expect.objectContaining({ left: 0, bottom: 0 }),
+    );
+  });
+
   it("switches to the selected editor window", () => {
-    const { props, root } = setup();
-    fireEvent.mouseEnter(root);
+    const { props, trigger } = setup();
+    fireEvent.click(trigger);
 
     fireEvent.click(screen.getByRole("menuitem", { name: /main/ }));
 
@@ -59,29 +77,30 @@ describe("WorktreeTab", () => {
     expect(props.onMenuClose).toHaveBeenCalledOnce();
   });
 
-  it("keeps the list open after click pins it", () => {
-    vi.useFakeTimers();
-    const { props, root, trigger } = setup();
-    fireEvent.mouseEnter(root);
+  it("toggles the list with repeated clicks", () => {
+    const { props, trigger } = setup();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
     fireEvent.click(trigger);
 
-    fireEvent.mouseLeave(root);
-    act(() => vi.advanceTimersByTime(250));
-
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(props.onMenuClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(props.onMenuClose).toHaveBeenCalledOnce();
   });
 
-  it("closes an unpinned hover list after the delay", () => {
-    vi.useFakeTimers();
-    const { props, root } = setup();
+  it("does not open the list on hover", () => {
+    const { root } = setup();
+
     fireEvent.mouseEnter(root);
 
-    fireEvent.mouseLeave(root);
-    act(() => vi.advanceTimersByTime(199));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
 
-    act(() => vi.advanceTimersByTime(1));
+  it("closes the list when clicking outside", () => {
+    const { props, trigger } = setup();
+    fireEvent.click(trigger);
+
+    fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(props.onMenuClose).toHaveBeenCalledOnce();
   });
