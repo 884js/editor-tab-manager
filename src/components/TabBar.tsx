@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
-import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment } from "../types/editor";
-import { windowKey } from "../utils/store";
+import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
+import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
 
 interface TabBarProps {
@@ -16,8 +16,8 @@ interface TabBarProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onReorderByVisual: (visualOrder: number[]) => void;
   claudeStatuses?: Record<string, ClaudeStatus>;
-  tabColors?: Record<string, string>;
-  onColorChange?: (windowName: string, colorId: string | null) => void;
+  tabColors?: TabColorMap;
+  onColorChange?: (windowKey: string, colorId: string | null) => void;
   showBranch?: boolean;
   history: HistoryEntry[];
   showAddMenu: boolean;
@@ -43,15 +43,13 @@ interface TabBarProps {
   onTabContextMenuClose: () => Promise<void>;
 }
 
-// フルパスからプロジェクト名を抽出してマッチング
 const toRgba = (rgb: { r: number; g: number; b: number }, alpha: number) =>
   `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 
-const getClaudeStatusForTab = (tabName: string, statuses?: Record<string, ClaudeStatus>) => {
+const getClaudeStatusForTab = (tab: EditorWindow, statuses?: Record<string, ClaudeStatus>) => {
   if (!statuses) return undefined;
   for (const [fullPath, status] of Object.entries(statuses)) {
-    const projectName = fullPath.split('/').pop();
-    if (projectName === tabName) return status;
+    if (projectPathMatchesWindow(fullPath, tab)) return status;
   }
   return undefined;
 };
@@ -132,7 +130,7 @@ function TabBar(props: TabBarProps) {
     if (colorPickerTarget !== null) {
       const tab = tabs[colorPickerTarget];
       if (tab) {
-        onColorChange?.(tab.name, colorId);
+        onColorChange?.(windowKey(tab), colorId);
       }
     }
     setColorPickerTarget(null);
@@ -267,8 +265,7 @@ function TabBar(props: TabBarProps) {
     const ungrouped: { tab: EditorWindow; originalIndex: number }[] = [];
 
     tabs.forEach((tab, index) => {
-      const wKey = windowKey(tab);
-      const groupId = groupAssignments[wKey];
+      const groupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
       if (groupId && groupIds.has(groupId)) {
         if (!grouped.has(groupId)) {
           grouped.set(groupId, []);
@@ -334,8 +331,8 @@ function TabBar(props: TabBarProps) {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       index={originalIndex}
-      claudeStatus={getClaudeStatusForTab(tab.name, claudeStatuses)}
-      colorId={tabColors?.[tab.name] ?? null}
+      claudeStatus={getClaudeStatusForTab(tab, claudeStatuses)}
+      colorId={tabColors ? getWindowScopedValue(tabColors, tab, tab.name) ?? null : null}
       onContextMenu={handleTabContextMenu}
       branch={showBranch !== false ? tab.branch : undefined}
     />
@@ -445,7 +442,11 @@ function TabBar(props: TabBarProps) {
 
       {colorPickerTarget !== null && (
         <ColorPicker
-          currentColorId={tabColors?.[tabs[colorPickerTarget]?.name] ?? null}
+          currentColorId={
+            tabColors && tabs[colorPickerTarget]
+              ? getWindowScopedValue(tabColors, tabs[colorPickerTarget], tabs[colorPickerTarget].name) ?? null
+              : null
+          }
           onSelect={handleColorSelect}
           onClose={handleColorPickerClose}
           anchorLeft={colorPickerAnchorLeft}
@@ -546,7 +547,11 @@ function TabBar(props: TabBarProps) {
                       {t("group.createNew")}
                     </button>
                   )}
-                  {tabContextMenu && tabs[tabContextMenu.index] && groupAssignments[windowKey(tabs[tabContextMenu.index])] && (
+                  {tabContextMenu && tabs[tabContextMenu.index] && getWindowScopedValue(
+                    groupAssignments,
+                    tabs[tabContextMenu.index],
+                    legacyWindowKey(tabs[tabContextMenu.index]),
+                  ) && (
                     <>
                       <div style={styles.contextMenuSeparator} />
                       <button

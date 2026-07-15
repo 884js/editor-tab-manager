@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, type MutableRefObject } from 
 import { invoke } from "@tauri-apps/api/core";
 import { EDITOR_DISPLAY_NAMES, MAX_HISTORY_ENTRIES } from "../types/editor";
 import type { EditorWindow, HistoryEntry } from "../types/editor";
-import { loadHistory, saveHistory } from "../utils/store";
+import { loadHistory, normalizeProjectPath, saveHistory } from "../utils/store";
 
 interface UseHistoryParams {
   refreshWindowsRef: MutableRefObject<() => Promise<void>>;
@@ -55,7 +55,10 @@ export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryR
         const editorName = EDITOR_DISPLAY_NAMES[bundleId] || win.editor_name || bundleId;
 
         updated = updated.filter(
-          (e) => !(e.name === win.name && e.bundleId === bundleId)
+          (e) => !(
+            normalizeProjectPath(e.path) === normalizeProjectPath(win.path) &&
+            e.bundleId === bundleId
+          )
         );
 
         updated.unshift({

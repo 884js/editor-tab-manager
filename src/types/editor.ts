@@ -52,8 +52,11 @@ export interface GroupDefinition {
 }
 
 export interface GroupAssignment {
-  [windowKey: string]: string; // windowKey -> groupId
+  [windowKey: string]: string | null; // null prevents legacy-key fallback after unassigning
 }
+
+// null prevents a cleared path-specific color from falling back to a legacy name key
+export type TabColorMap = Record<string, string | null>;
 
 // Claude Code status
 export type ClaudeStatus = "waiting" | "generating";

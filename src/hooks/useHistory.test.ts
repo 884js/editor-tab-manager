@@ -11,6 +11,7 @@ const mockSaveHistory = vi.fn<(entries: HistoryEntry[]) => Promise<void>>().mock
 vi.mock("../utils/store", () => ({
   loadHistory: (...args: unknown[]) => mockLoadHistory(...(args as [])),
   saveHistory: (...args: unknown[]) => mockSaveHistory(...(args as [HistoryEntry[]])),
+  normalizeProjectPath: (path: string) => path.replace(/\/+$/, ""),
 }));
 
 function makeWindow(overrides: Partial<EditorWindow> = {}): EditorWindow {
@@ -97,9 +98,9 @@ describe("useHistory", () => {
       expect(result.current.history).toHaveLength(0);
     });
 
-    it("deduplicates by name+bundleId", async () => {
+    it("deduplicates by path+bundleId", async () => {
       const existing: HistoryEntry[] = [
-        { name: "proj", path: "/old", bundleId: "com.microsoft.VSCode", editorName: "VSCode", timestamp: 1000 },
+        { name: "old-name", path: "/worktrees/one/proj", bundleId: "com.microsoft.VSCode", editorName: "VSCode", timestamp: 1000 },
       ];
       const { result } = setup(existing);
 
@@ -107,13 +108,35 @@ describe("useHistory", () => {
         expect(result.current.history).toHaveLength(1);
       });
 
-      const win = makeWindow({ name: "proj", path: "/new" });
+      const win = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
       act(() => {
         result.current.addToHistory([win]);
       });
 
       expect(result.current.history).toHaveLength(1);
-      expect(result.current.history[0].path).toBe("/new");
+      expect(result.current.history[0].name).toBe("proj");
+    });
+
+    it("keeps same-named worktrees as separate history entries", async () => {
+      const existing: HistoryEntry[] = [
+        { name: "proj", path: "/worktrees/one/proj", bundleId: "com.microsoft.VSCode", editorName: "VSCode", timestamp: 1000 },
+      ];
+      const { result } = setup(existing);
+
+      await waitFor(() => {
+        expect(result.current.history).toHaveLength(1);
+      });
+
+      act(() => {
+        result.current.addToHistory([
+          makeWindow({ name: "proj", path: "/worktrees/two/proj" }),
+        ]);
+      });
+
+      expect(result.current.history.map((entry) => entry.path)).toEqual([
+        "/worktrees/two/proj",
+        "/worktrees/one/proj",
+      ]);
     });
 
     it("respects MAX_HISTORY_ENTRIES limit", async () => {

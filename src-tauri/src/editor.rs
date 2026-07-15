@@ -2,11 +2,14 @@ use crate::ax_helper;
 use crate::editor_config::{EditorConfig, EDITORS};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 lazy_static::lazy_static! {
-    /// プロジェクト名 → フルパスのキャッシュ
-    static ref PROJECT_PATH_CACHE: std::sync::Mutex<HashMap<String, PathBuf>> =
+    /// エディタID + プロジェクト名 → フルパス候補のキャッシュ
+    static ref PROJECT_PATH_CACHE: std::sync::Mutex<HashMap<String, Vec<PathBuf>>> =
+        std::sync::Mutex::new(HashMap::new());
+    /// エディタID + ウィンドウID + プロジェクト名 → フルパスのキャッシュ
+    static ref WINDOW_PATH_CACHE: std::sync::Mutex<HashMap<(String, u32, String), PathBuf>> =
         std::sync::Mutex::new(HashMap::new());
     /// エディタIDごとの初期化フラグ
     static ref CACHE_INITIALIZED: std::sync::Mutex<HashMap<String, bool>> =
@@ -222,15 +225,16 @@ pub fn get_active_window_id() -> Option<u32> {
 ///
 /// Called by the registry when an editor's PID changes (restart), since a
 /// restart can mean workspace.json files changed while we weren't looking.
-/// `PROJECT_PATH_CACHE` is keyed by project name (not editor_id), so we clear
-/// it entirely — cheaper than introducing an editor-tagged key and the cost
-/// of a re-read is paid at most once per editor restart.
 pub fn invalidate_path_cache_for_editor(editor_id: &str) {
     if let Ok(mut initialized) = CACHE_INITIALIZED.lock() {
         initialized.remove(editor_id);
     }
     if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
-        cache.clear();
+        let prefix = format!("{}:", editor_id);
+        cache.retain(|key, _| !key.starts_with(&prefix));
+    }
+    if let Ok(mut cache) = WINDOW_PATH_CACHE.lock() {
+        cache.retain(|(cached_editor_id, _, _), _| cached_editor_id != editor_id);
     }
 }
 
@@ -245,8 +249,18 @@ fn get_workspace_storage_dir(editor_id: &str) -> Option<PathBuf> {
     Some(home.join("Library/Application Support").join(subdir).join("User/workspaceStorage"))
 }
 
-/// workspaceStorage内の全workspace.jsonを読み取り、プロジェクト名→フルパスのマッピングを返す
-fn load_workspace_paths(editor_id: &str) -> HashMap<String, PathBuf> {
+fn add_workspace_path(map: &mut HashMap<String, Vec<PathBuf>>, path: PathBuf) {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let paths = map.entry(name.to_string()).or_default();
+    if !paths.contains(&path) {
+        paths.push(path);
+    }
+}
+
+/// workspaceStorage内の全workspace.jsonを読み取り、プロジェクト名→フルパス候補のマッピングを返す
+fn load_workspace_paths(editor_id: &str) -> HashMap<String, Vec<PathBuf>> {
     let mut map = HashMap::new();
     let storage_dir = match get_workspace_storage_dir(editor_id) {
         Some(d) => d,
@@ -267,8 +281,8 @@ fn load_workspace_paths(editor_id: &str) -> HashMap<String, PathBuf> {
                     // URLデコード（スペースなどの%エンコード対応）
                     let decoded = percent_decode(path_str);
                     let path = PathBuf::from(&decoded);
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        map.insert(name.to_string(), path);
+                    if path.exists() {
+                        add_workspace_path(&mut map, path);
                     }
                 }
             }
@@ -302,74 +316,126 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8(bytes).unwrap_or_else(|_| input.to_string())
 }
 
-/// プロジェクト名からフルパスを解決する
-/// 1. キャッシュにあれば即返却
-/// 2. キャッシュ未初期化 → workspaceStorage から一括読み込み → 再チェック
-/// 3. フォールバック: AXDocument（前面ウィンドウでは動作）
+fn workspace_cache_key(editor_id: &str, project_name: &str) -> String {
+    format!("{}:{}", editor_id, project_name)
+}
+
+fn cache_window_path(editor_id: &str, window_id: u32, project_name: &str, path: &Path) {
+    if let Ok(mut cache) = WINDOW_PATH_CACHE.lock() {
+        cache.insert(
+            (editor_id.to_string(), window_id, project_name.to_string()),
+            path.to_path_buf(),
+        );
+    }
+}
+
+fn cache_project_path(editor_id: &str, project_name: &str, path: &Path) {
+    if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
+        let paths = cache
+            .entry(workspace_cache_key(editor_id, project_name))
+            .or_default();
+        if !paths.iter().any(|cached_path| cached_path == path) {
+            paths.push(path.to_path_buf());
+        }
+    }
+}
+
+fn ensure_workspace_paths_loaded(editor_id: &str) -> Option<()> {
+    let mut initialized = CACHE_INITIALIZED.lock().ok()?;
+    if initialized.get(editor_id).copied().unwrap_or(false) {
+        return Some(());
+    }
+
+    let paths = load_workspace_paths(editor_id);
+    let mut cache = PROJECT_PATH_CACHE.lock().ok()?;
+    for (name, candidate_paths) in paths {
+        let cached_paths = cache
+            .entry(workspace_cache_key(editor_id, &name))
+            .or_default();
+        for path in candidate_paths {
+            if !cached_paths.contains(&path) {
+                cached_paths.push(path);
+            }
+        }
+    }
+    initialized.insert(editor_id.to_string(), true);
+    Some(())
+}
+
+fn workspace_path_for_document(candidates: &[PathBuf], document_path: &Path) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .filter(|candidate| document_path.starts_with(candidate))
+        .max_by_key(|candidate| candidate.components().count())
+        .cloned()
+}
+
+/// プロジェクト名とウィンドウ情報からフルパスを解決する
 fn resolve_project_path(
     project_name: &str,
     editor_id: &str,
     pid: i32,
     window_id: u32,
 ) -> Option<PathBuf> {
-    // 1. キャッシュから検索
-    {
+    let document_path = ax_helper::get_document_path(pid, window_id).map(PathBuf::from);
+    ensure_workspace_paths_loaded(editor_id)?;
+
+    let project_paths = {
         let cache = PROJECT_PATH_CACHE.lock().ok()?;
-        if let Some(path) = cache.get(project_name) {
+        cache
+            .get(&workspace_cache_key(editor_id, project_name))
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    if let Some(document_path) = document_path {
+        // ドキュメントを内包するワークスペースを選び、同名ワークツリーやサブモジュールを区別する
+        if let Some(workspace_path) = workspace_path_for_document(&project_paths, &document_path) {
+            cache_window_path(editor_id, window_id, project_name, &workspace_path);
+            return Some(workspace_path);
+        }
+        if let Some(git_root) = find_git_root(&document_path) {
+            cache_window_path(editor_id, window_id, project_name, &git_root);
+            cache_project_path(editor_id, project_name, &git_root);
+            return Some(git_root);
+        }
+    }
+
+    let window_cache_key = (editor_id.to_string(), window_id, project_name.to_string());
+    {
+        let cache = WINDOW_PATH_CACHE.lock().ok()?;
+        if let Some(path) = cache.get(&window_cache_key) {
             return Some(path.clone());
         }
     }
 
-    // 2. キャッシュ未初期化ならworkspaceStorageから読み込み
-    {
-        let mut initialized = CACHE_INITIALIZED.lock().ok()?;
-        if !initialized.get(editor_id).copied().unwrap_or(false) {
-            let paths = load_workspace_paths(editor_id);
-            let mut cache = PROJECT_PATH_CACHE.lock().ok()?;
-            for (name, path) in paths {
-                cache.entry(name).or_insert(path);
-            }
-            initialized.insert(editor_id.to_string(), true);
-        }
+    if project_paths.len() == 1 {
+        let path = project_paths[0].clone();
+        cache_window_path(editor_id, window_id, project_name, &path);
+        return Some(path);
     }
 
-    // キャッシュを再チェック
-    {
-        let cache = PROJECT_PATH_CACHE.lock().ok()?;
-        if let Some(path) = cache.get(project_name) {
-            return Some(path.clone());
-        }
-    }
-
-    // 3. キャッシュ済みパスのサブディレクトリを検索（サブモジュール等）
     {
         let parent_paths: Vec<PathBuf> = {
             let cache = PROJECT_PATH_CACHE.lock().ok()?;
-            cache.values().cloned().collect()
+            let prefix = format!("{}:", editor_id);
+            cache
+                .iter()
+                .filter(|(key, _)| key.starts_with(&prefix))
+                .flat_map(|(_, paths)| paths.iter().cloned())
+                .collect()
         };
         for parent_path in &parent_paths {
             let candidate = parent_path.join(project_name);
             if candidate.is_dir() && candidate.join(".git").exists() {
-                if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
-                    cache.insert(project_name.to_string(), candidate.clone());
-                }
+                cache_window_path(editor_id, window_id, project_name, &candidate);
+                cache_project_path(editor_id, project_name, &candidate);
                 return Some(candidate);
             }
         }
     }
 
-    // 4. フォールバック: AXDocument
-    let doc_path = ax_helper::get_document_path(pid, window_id)?;
-    let path = PathBuf::from(&doc_path);
-    let parent = path.parent()?;
-    let git_root = find_git_root(parent)?;
-
-    // 成功時はキャッシュに追加
-    if let Ok(mut cache) = PROJECT_PATH_CACHE.lock() {
-        cache.insert(project_name.to_string(), git_root.clone());
-    }
-
-    Some(git_root)
+    None
 }
 
 /// Extract project name from editor window title
@@ -536,6 +602,23 @@ mod tests {
     }
 
     #[test]
+    fn find_git_root_from_file_in_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree = tmp.path().join("worktrees/project");
+        let source_dir = worktree.join("src");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/repo/.git/worktrees/project\n",
+        )
+        .unwrap();
+        let source_file = source_dir.join("main.rs");
+        fs::write(&source_file, "fn main() {}\n").unwrap();
+
+        assert_eq!(find_git_root(&source_file), Some(worktree));
+    }
+
+    #[test]
     fn get_git_branch_normal() {
         let tmp = tempfile::tempdir().unwrap();
         let git_dir = tmp.path().join(".git");
@@ -590,6 +673,27 @@ mod tests {
 
         let result = get_git_branch(&sub_dir);
         assert_eq!(result, Some("develop".to_string()));
+    }
+
+    #[test]
+    fn get_git_branch_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_dir = tmp.path().join("main/.git/worktrees/feature");
+        fs::create_dir_all(&git_dir).unwrap();
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature/worktree\n").unwrap();
+
+        let worktree = tmp.path().join("worktrees/project");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            get_git_branch(&worktree),
+            Some("feature/worktree".to_string())
+        );
     }
 
     #[test]
@@ -650,5 +754,28 @@ mod tests {
 
         let zed_dir = get_workspace_storage_dir("zed");
         assert!(zed_dir.is_none());
+    }
+
+    #[test]
+    fn workspace_paths_keep_same_named_worktrees() {
+        let mut paths = HashMap::new();
+        add_workspace_path(&mut paths, PathBuf::from("/worktrees/one/project"));
+        add_workspace_path(&mut paths, PathBuf::from("/worktrees/two/project"));
+
+        assert_eq!(paths.get("project").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn workspace_path_matches_document_in_same_named_worktree() {
+        let candidates = vec![
+            PathBuf::from("/worktrees/one/project"),
+            PathBuf::from("/worktrees/two/project"),
+        ];
+        let document = PathBuf::from("/worktrees/two/project/modules/api/src/lib.rs");
+
+        assert_eq!(
+            workspace_path_for_document(&candidates, &document),
+            Some(PathBuf::from("/worktrees/two/project"))
+        );
     }
 }

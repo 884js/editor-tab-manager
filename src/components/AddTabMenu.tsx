@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { EditorWindow, HistoryEntry } from "../types/editor";
+import { normalizeProjectPath, windowKey } from "../utils/store";
 
 interface AddTabMenuProps {
   entries: HistoryEntry[];
@@ -30,8 +31,10 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Filter out currently open tabs from history
-  const currentNames = new Set(currentWindows.map(w => w.name));
-  const filteredEntries = entries.filter(e => !currentNames.has(e.name));
+  const currentWindowKeys = new Set(currentWindows.map(windowKey));
+  const filteredEntries = entries.filter(
+    (entry) => !currentWindowKeys.has(`${entry.bundleId}:${normalizeProjectPath(entry.path)}`)
+  );
 
   // Calculate position from anchor button
   useEffect(() => {

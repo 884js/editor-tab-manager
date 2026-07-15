@@ -5,7 +5,7 @@ import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
-import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment } from "../types/editor";
+import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
@@ -37,7 +37,7 @@ interface UseEditorWindowsParams {
 interface UseEditorWindowsReturn {
   windows: EditorWindow[];
   activeIndex: number;
-  tabColors: Record<string, string>;
+  tabColors: TabColorMap;
   groups: GroupDefinition[];
   groupAssignments: GroupAssignment;
   collapsedGroups: Set<string>;
@@ -55,7 +55,7 @@ interface UseEditorWindowsReturn {
   handleCloseTab: (index: number) => Promise<void>;
   handleReorder: (from: number, to: number) => void;
   handleReorderByVisual: (visualOrder: number[]) => void;
-  handleColorChange: (name: string, colorId: string | null) => void;
+  handleColorChange: (windowKey: string, colorId: string | null) => void;
   addGroup: (name: string) => string;
   updateGroup: (groupId: string, name: string) => void;
   deleteGroup: (groupId: string) => void;
@@ -78,7 +78,7 @@ export function useEditorWindows({
 }: UseEditorWindowsParams): UseEditorWindowsReturn {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [tabColors, setTabColors] = useState<Record<string, string>>({});
+  const [tabColors, setTabColors] = useState<TabColorMap>({});
   const [groups, setGroups] = useState<GroupDefinition[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<GroupAssignment>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -120,7 +120,9 @@ export function useEditorWindows({
         sorted.length !== currentWindows.length ||
         sorted.some(
           (w, i) =>
+            currentWindows[i]?.id !== w.id ||
             currentWindows[i]?.name !== w.name ||
+            currentWindows[i]?.path !== w.path ||
             currentWindows[i]?.bundle_id !== w.bundle_id ||
             currentWindows[i]?.branch !== w.branch
         );
@@ -287,13 +289,13 @@ export function useEditorWindows({
     setActiveIndex(Math.max(newActiveIndex, 0));
   }, []);
 
-  const handleColorChange = useCallback((windowName: string, colorId: string | null) => {
+  const handleColorChange = useCallback((key: string, colorId: string | null) => {
     setTabColors((prev) => {
       const next = { ...prev };
       if (colorId === null) {
-        delete next[windowName];
+        next[key] = null;
       } else {
-        next[windowName] = colorId;
+        next[key] = colorId;
       }
       saveTabColors(next);
       return next;
@@ -358,8 +360,7 @@ export function useEditorWindows({
 
   const unassignTabFromGroup = useCallback((wKey: string) => {
     setGroupAssignments((prev) => {
-      const next = { ...prev };
-      delete next[wKey];
+      const next = { ...prev, [wKey]: null };
       saveGroupAssignments(next);
       return next;
     });
@@ -434,7 +435,9 @@ export function useEditorWindows({
         sorted.length !== currentWindows.length ||
         sorted.some(
           (w, i) =>
+            currentWindows[i]?.id !== w.id ||
             currentWindows[i]?.name !== w.name ||
+            currentWindows[i]?.path !== w.path ||
             currentWindows[i]?.bundle_id !== w.bundle_id ||
             currentWindows[i]?.branch !== w.branch
         );
@@ -593,7 +596,9 @@ export function useEditorWindows({
           sorted.length !== currentWindows.length ||
           sorted.some(
             (w, i) =>
+              currentWindows[i]?.id !== w.id ||
               currentWindows[i]?.name !== w.name ||
+              currentWindows[i]?.path !== w.path ||
               currentWindows[i]?.bundle_id !== w.bundle_id ||
               currentWindows[i]?.branch !== w.branch
           );

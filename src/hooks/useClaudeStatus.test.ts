@@ -209,6 +209,30 @@ describe("useClaudeStatus", () => {
       expect(result.current.dismissedWaitingRef.current.has("/path/proj")).toBe(true);
     });
 
+    it("dismisses only the matching same-named worktree", async () => {
+      const refs = makeRefs();
+      refs.windowsRef.current = [
+        { id: 1, name: "proj", path: "/worktrees/one/proj", bundle_id: "com.microsoft.VSCode", editor_name: "VSCode" },
+        { id: 2, name: "proj", path: "/worktrees/two/proj", bundle_id: "com.microsoft.VSCode", editor_name: "VSCode" },
+      ];
+      const { result, emitClaudeStatus } = setup(refs);
+
+      await waitFor(() => expect(listen).toHaveBeenCalled());
+
+      act(() => {
+        emitClaudeStatus({
+          statuses: {
+            "/worktrees/one/proj": "waiting",
+            "/worktrees/two/proj": "waiting",
+          },
+        });
+        result.current.dismissWaitingForWindow(refs.windowsRef.current[1]);
+      });
+
+      expect(result.current.claudeStatuses["/worktrees/one/proj"]).toBe("waiting");
+      expect(result.current.claudeStatuses["/worktrees/two/proj"]).toBeUndefined();
+    });
+
     it("clears dismissed path when generating again", async () => {
       const refs = makeRefs();
       refs.windowsRef.current = [
@@ -302,6 +326,32 @@ describe("useClaudeStatus", () => {
       expect(result.current.claudeStatuses["/path/proj"]).toBeUndefined();
 
       vi.useRealTimers();
+    });
+  });
+
+  it("focuses the exact worktree when a notification is clicked", async () => {
+    const refs = makeRefs();
+    refs.windowsRef.current = [
+      { id: 1, name: "proj", path: "/worktrees/one/proj", bundle_id: "com.microsoft.VSCode", editor_name: "VSCode" },
+      { id: 2, name: "proj", path: "/worktrees/two/proj", bundle_id: "com.microsoft.VSCode", editor_name: "VSCode" },
+    ];
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { listeners } = setup(refs);
+
+    await waitFor(() => expect(listeners.has("notification-clicked")).toBe(true));
+
+    act(() => {
+      const handler = listeners.get("notification-clicked") as unknown as (
+        event: { payload: { project_path: string } }
+      ) => void;
+      handler({ payload: { project_path: "/worktrees/two/proj" } });
+    });
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("focus_editor_window", {
+        bundle_id: "com.microsoft.VSCode",
+        window_id: 2,
+      });
     });
   });
 
