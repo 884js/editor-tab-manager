@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 lazy_static::lazy_static! {
-    /// エディタID + プロジェクト名 → フルパス候補のキャッシュ
+    /// Editor ID + project name -> full path candidates
     static ref PROJECT_PATH_CACHE: std::sync::Mutex<HashMap<String, Vec<PathBuf>>> =
         std::sync::Mutex::new(HashMap::new());
-    /// エディタID + ウィンドウID + プロジェクト名 → フルパスのキャッシュ
+    /// Editor ID + window ID + project name -> full path
     static ref WINDOW_PATH_CACHE: std::sync::Mutex<HashMap<(String, u32, String), PathBuf>> =
         std::sync::Mutex::new(HashMap::new());
     /// エディタIDごとの初期化フラグ
@@ -259,7 +259,7 @@ fn add_workspace_path(map: &mut HashMap<String, Vec<PathBuf>>, path: PathBuf) {
     }
 }
 
-/// workspaceStorage内の全workspace.jsonを読み取り、プロジェクト名→フルパス候補のマッピングを返す
+/// Read workspace.json files and map project names to full path candidates
 fn load_workspace_paths(editor_id: &str) -> HashMap<String, Vec<PathBuf>> {
     let mut map = HashMap::new();
     let storage_dir = match get_workspace_storage_dir(editor_id) {
@@ -370,7 +370,7 @@ fn workspace_path_for_document(candidates: &[PathBuf], document_path: &Path) -> 
         .cloned()
 }
 
-/// プロジェクト名とウィンドウ情報からフルパスを解決する
+/// Resolve a full path from the project name and window metadata
 fn resolve_project_path(
     project_name: &str,
     editor_id: &str,
@@ -389,7 +389,7 @@ fn resolve_project_path(
     };
 
     if let Some(document_path) = document_path {
-        // ドキュメントを内包するワークスペースを選び、同名ワークツリーやサブモジュールを区別する
+        // Use the containing workspace to distinguish same-named worktrees and submodules
         if let Some(workspace_path) = workspace_path_for_document(&project_paths, &document_path) {
             cache_window_path(editor_id, window_id, project_name, &workspace_path);
             return Some(workspace_path);
