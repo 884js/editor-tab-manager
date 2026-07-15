@@ -218,6 +218,30 @@ describe("useEditorWindows", () => {
       expect(result.current.windows[0].path).toBe("/worktrees/two/project");
     });
 
+    it("updates a window when repository metadata becomes available", async () => {
+      const initial = makeWindow({ repository_id: undefined, repository_name: undefined });
+      const resolved = makeWindow({
+        repository_id: "/projects/project/.git",
+        repository_name: "project",
+      });
+      vi.mocked(invoke).mockResolvedValue([initial]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      vi.mocked(invoke).mockResolvedValue([resolved]);
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      expect(result.current.windows[0]).toMatchObject({
+        repository_id: "/projects/project/.git",
+        repository_name: "project",
+      });
+    });
+
     it("updates the window id when the same worktree is reopened", async () => {
       const first = makeWindow({ id: 1, name: "project", path: "/worktrees/one/project" });
       const reopened = makeWindow({ id: 2, name: "project", path: "/worktrees/one/project" });
@@ -456,8 +480,8 @@ describe("useEditorWindows", () => {
       const key = "com.microsoft.VSCode:/worktrees/one/project";
 
       act(() => {
-        result.current.assignTabToGroup(key, "group-a");
-        result.current.unassignTabFromGroup(key);
+        result.current.assignTabsToGroup([key], "group-a");
+        result.current.unassignTabsFromGroup([key]);
       });
 
       expect(result.current.groupAssignments[key]).toBeNull();

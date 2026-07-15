@@ -76,6 +76,13 @@ function TabBar(props: TabBarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tabsWrapperRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const contextMenuWindowKeys = useMemo(() => {
+    if (!tabContextMenu) return [];
+    return tabContextMenu.indices
+      .map((index) => tabs[index])
+      .filter((tab): tab is EditorWindow => Boolean(tab))
+      .map(windowKey);
+  }, [tabContextMenu, tabs]);
 
   useEffect(() => {
     if (activeIndex < 0) return;
@@ -169,39 +176,27 @@ function TabBar(props: TabBarProps) {
   }, [onTabContextMenuClose]);
 
   const handleAssignToGroup = useCallback((groupId: string) => {
-    if (tabContextMenu) {
-      const keys = tabContextMenu.indices
-        .map((index) => tabs[index])
-        .filter((tab): tab is EditorWindow => Boolean(tab))
-        .map(windowKey);
-      onAssignTabsToGroup(keys, groupId);
+    if (contextMenuWindowKeys.length > 0) {
+      onAssignTabsToGroup(contextMenuWindowKeys, groupId);
     }
     closeTabContextMenu();
-  }, [tabContextMenu, tabs, onAssignTabsToGroup, closeTabContextMenu]);
+  }, [contextMenuWindowKeys, onAssignTabsToGroup, closeTabContextMenu]);
 
   const handleUnassignFromGroup = useCallback(() => {
-    if (tabContextMenu) {
-      const keys = tabContextMenu.indices
-        .map((index) => tabs[index])
-        .filter((tab): tab is EditorWindow => Boolean(tab))
-        .map(windowKey);
-      onUnassignTabsFromGroup(keys);
+    if (contextMenuWindowKeys.length > 0) {
+      onUnassignTabsFromGroup(contextMenuWindowKeys);
     }
     closeTabContextMenu();
-  }, [tabContextMenu, tabs, onUnassignTabsFromGroup, closeTabContextMenu]);
+  }, [contextMenuWindowKeys, onUnassignTabsFromGroup, closeTabContextMenu]);
 
   const handleCreateNewGroup = useCallback(() => {
-    if (newGroupInput !== null && newGroupInput.trim() && tabContextMenu) {
+    if (newGroupInput !== null && newGroupInput.trim() && contextMenuWindowKeys.length > 0) {
       const groupId = onAddGroup(newGroupInput.trim());
-      const keys = tabContextMenu.indices
-        .map((index) => tabs[index])
-        .filter((tab): tab is EditorWindow => Boolean(tab))
-        .map(windowKey);
-      onAssignTabsToGroup(keys, groupId);
+      onAssignTabsToGroup(contextMenuWindowKeys, groupId);
     }
     setNewGroupInput(null);
     closeTabContextMenu();
-  }, [newGroupInput, onAddGroup, tabContextMenu, tabs, onAssignTabsToGroup, closeTabContextMenu]);
+  }, [newGroupInput, contextMenuWindowKeys, onAddGroup, onAssignTabsToGroup, closeTabContextMenu]);
 
   // Group label context menu
   const handleGroupLabelContextMenu = useCallback(async (e: React.MouseEvent, groupId: string) => {

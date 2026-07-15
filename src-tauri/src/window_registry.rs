@@ -304,4 +304,14 @@ mod tests {
         }];
         assert!(windows_differ(&a, &b));
     }
+
+    #[test]
+    fn repository_identity_change_is_detected() {
+        let a = vec![mk(1, "project", "b1")];
+        let mut resolved = mk(1, "project", "b1");
+        resolved.repository_id = Some("/projects/project/.git".into());
+        resolved.repository_name = Some("project".into());
+
+        assert!(windows_differ(&a, &[resolved]));
+    }
 }

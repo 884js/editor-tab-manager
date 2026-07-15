@@ -79,7 +79,7 @@ function WorktreeTab({
     };
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [closeMenu, contextEntry.tab.bundle_id, contextEntry.tab.repository_id, isOpen]);
+  }, [closeMenu, isOpen]);
 
   return (
     <div
@@ -97,7 +97,7 @@ function WorktreeTab({
         type="button"
         style={{
           ...styles.tab,
-          ...(isOpen && !isActive ? styles.tabHover : {}),
+          ...(isOpen && !isActive ? styles.tabOpen : {}),
           ...(isActive ? styles.tabActive : {}),
         }}
         onClick={() => {
@@ -133,7 +133,6 @@ function WorktreeTab({
           ref={menuRef}
           role="menu"
           aria-label={t("worktree.branchList", { name })}
-          data-worktree-menu={`${contextEntry.tab.bundle_id}:${contextEntry.tab.repository_id}`}
           style={{ ...styles.menu, left: menuPosition.left, top: menuPosition.top }}
         >
           {entries.map(({ tab, originalIndex }) => {
@@ -215,7 +214,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#484848",
     borderBottom: "2px solid #007aff",
   },
-  tabHover: {
+  tabOpen: {
     background: "#333333",
   },
   name: {
@@ -240,6 +239,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "rgba(255, 255, 255, 0.75)",
     fontSize: "10px",
     fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
   },
   chevron: {
     color: "rgba(255, 255, 255, 0.55)",

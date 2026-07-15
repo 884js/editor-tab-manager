@@ -59,13 +59,26 @@ interface UseEditorWindowsReturn {
   addGroup: (name: string) => string;
   updateGroup: (groupId: string, name: string) => void;
   deleteGroup: (groupId: string) => void;
-  assignTabToGroup: (wKey: string, groupId: string) => void;
-  unassignTabFromGroup: (wKey: string) => void;
   assignTabsToGroup: (wKeys: string[], groupId: string) => void;
   unassignTabsFromGroup: (wKeys: string[]) => void;
   toggleGroupCollapse: (groupId: string) => void;
   reorderGroups: (fromIndex: number, toIndex: number) => void;
   setGroupColor: (groupId: string, colorId: string | null) => void;
+}
+
+function editorWindowListsDiffer(next: EditorWindow[], current: EditorWindow[]): boolean {
+  return next.length !== current.length || next.some((window, index) => {
+    const previous = current[index];
+    return !previous ||
+      previous.id !== window.id ||
+      previous.name !== window.name ||
+      previous.path !== window.path ||
+      previous.branch !== window.branch ||
+      previous.repository_id !== window.repository_id ||
+      previous.repository_name !== window.repository_name ||
+      previous.bundle_id !== window.bundle_id ||
+      previous.editor_name !== window.editor_name;
+  });
 }
 
 export function useEditorWindows({
@@ -118,16 +131,7 @@ export function useEditorWindows({
       }
 
       const currentWindows = windowsRef.current;
-      const hasChanged =
-        sorted.length !== currentWindows.length ||
-        sorted.some(
-          (w, i) =>
-            currentWindows[i]?.id !== w.id ||
-            currentWindows[i]?.name !== w.name ||
-            currentWindows[i]?.path !== w.path ||
-            currentWindows[i]?.bundle_id !== w.bundle_id ||
-            currentWindows[i]?.branch !== w.branch
-        );
+      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
 
       if (hasChanged) {
         // Skip clearing windows on transient AX API empty response
@@ -370,16 +374,6 @@ export function useEditorWindows({
     });
   }, []);
 
-  const assignTabToGroup = useCallback(
-    (wKey: string, groupId: string) => assignTabsToGroup([wKey], groupId),
-    [assignTabsToGroup],
-  );
-
-  const unassignTabFromGroup = useCallback(
-    (wKey: string) => unassignTabsFromGroup([wKey]),
-    [unassignTabsFromGroup],
-  );
-
   const toggleGroupCollapse = useCallback((groupId: string) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -445,16 +439,7 @@ export function useEditorWindows({
       tabOrderRef.current = sorted.map((w) => windowKey(w));
 
       const currentWindows = windowsRef.current;
-      const hasChanged =
-        sorted.length !== currentWindows.length ||
-        sorted.some(
-          (w, i) =>
-            currentWindows[i]?.id !== w.id ||
-            currentWindows[i]?.name !== w.name ||
-            currentWindows[i]?.path !== w.path ||
-            currentWindows[i]?.bundle_id !== w.bundle_id ||
-            currentWindows[i]?.branch !== w.branch
-        );
+      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
 
       if (hasChanged) {
         // Skip clearing windows on transient AX API empty response
@@ -606,16 +591,7 @@ export function useEditorWindows({
         }
 
         const currentWindows = windowsRef.current;
-        const windowsChanged =
-          sorted.length !== currentWindows.length ||
-          sorted.some(
-            (w, i) =>
-              currentWindows[i]?.id !== w.id ||
-              currentWindows[i]?.name !== w.name ||
-              currentWindows[i]?.path !== w.path ||
-              currentWindows[i]?.bundle_id !== w.bundle_id ||
-              currentWindows[i]?.branch !== w.branch
-          );
+        const windowsChanged = editorWindowListsDiffer(sorted, currentWindows);
 
         if (windowsChanged) {
           const newKeys = new Set(sorted.map((w) => windowKey(w)));
@@ -680,8 +656,6 @@ export function useEditorWindows({
     addGroup,
     updateGroup,
     deleteGroup,
-    assignTabToGroup,
-    unassignTabFromGroup,
     assignTabsToGroup,
     unassignTabsFromGroup,
     toggleGroupCollapse,
