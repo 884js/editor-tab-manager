@@ -312,6 +312,41 @@ describe("useAppLifecycle", () => {
       });
     });
 
+    it("does not resize the window when the tab manager becomes active", async () => {
+      vi.mocked(invoke).mockResolvedValue(true);
+      const { result, listeners, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.hasAccessibilityPermission).toBe(true);
+        expect(result.current.onboardingCompleted).toBe(true);
+        expect(listeners.has("app-activated")).toBe(true);
+        expect(params.syncActiveTabRef.current).toHaveBeenCalled();
+      });
+
+      const appWindow = getCurrentWindow();
+      vi.mocked(appWindow.setMaxSize).mockClear();
+      vi.mocked(appWindow.setSize).mockClear();
+      vi.mocked(appWindow.setPosition).mockClear();
+
+      await act(async () => {
+        const handler = listeners.get("app-activated")!;
+        handler({
+          payload: {
+            app_type: "tab_manager",
+            bundle_id: null,
+            is_on_primary_screen: true,
+            covers_editor: false,
+          } satisfies AppActivationPayload,
+        });
+      });
+
+      expect(params.isEditorActiveRef.current).toBe(false);
+      expect(params.isTabManagerActiveRef.current).toBe(true);
+      expect(appWindow.setMaxSize).not.toHaveBeenCalled();
+      expect(appWindow.setSize).not.toHaveBeenCalled();
+      expect(appWindow.setPosition).not.toHaveBeenCalled();
+    });
+
     it("hides window on other app activation", async () => {
       vi.mocked(invoke).mockResolvedValue(true);
       const { result, listeners, params } = setup({ "onboarding:completed": true });

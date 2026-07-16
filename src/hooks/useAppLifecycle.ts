@@ -344,11 +344,12 @@ export function useAppLifecycle({
           if (app_type === "editor" && bundle_id) {
             currentBundleIdRef.current = bundle_id;
           }
+          // Keep the current size when a click activates the tab manager so the click can finish.
           if (app_type === "editor") {
             // Wait 150ms for macOS window animation to complete
             await new Promise((resolve) => setTimeout(resolve, 150));
+            await resizeTabBar();
           }
-          await resizeTabBar();
           isVisibleRef.current = true;
           if (app_type === "editor") {
             await fetchWindowsRef.current();

@@ -55,6 +55,23 @@ describe("WorktreeTab", () => {
     expect(props.onMenuOpen).toHaveBeenCalledWith(2);
   });
 
+  it("opens on primary mouse down without toggling again on click", () => {
+    const { props, trigger } = setup();
+
+    fireEvent.mouseDown(trigger, { button: 0 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.click(trigger, { detail: 1 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(props.onMenuOpen).toHaveBeenCalledOnce();
+    expect(props.onMenuClose).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(trigger, { button: 0 });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(props.onMenuClose).toHaveBeenCalledOnce();
+  });
+
   it("opens the parent context menu for every repository window", () => {
     const { props, trigger } = setup();
 

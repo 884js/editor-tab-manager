@@ -61,6 +61,14 @@ function WorktreeTab({
     }
   }, [entries.length, isOpen, onMenuOpen]);
 
+  const toggleMenu = useCallback(() => {
+    if (isOpen) {
+      closeMenu();
+      return;
+    }
+    openMenu();
+  }, [closeMenu, isOpen, openMenu]);
+
   useEffect(() => {
     isOpenRef.current = isOpen;
   }, [isOpen]);
@@ -100,12 +108,14 @@ function WorktreeTab({
           ...(isOpen && !isActive ? styles.tabOpen : {}),
           ...(isActive ? styles.tabActive : {}),
         }}
-        onClick={() => {
-          if (isOpen) {
-            closeMenu();
-            return;
-          }
-          openMenu();
+        onMouseDown={(event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          toggleMenu();
+        }}
+        onClick={(event) => {
+          // Mouse activation is handled on mousedown so it cannot be lost while the app activates.
+          if (event.detail === 0) toggleMenu();
         }}
         onContextMenu={(event) => {
           event.preventDefault();
