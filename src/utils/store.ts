@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
-import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, TabColorMap } from "../types/editor";
+import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, TabColorMap, TabLayout } from "../types/editor";
 
 // Store instance (lazily initialized)
 let storePromise: Promise<Store> | null = null;
@@ -21,6 +21,7 @@ export const GROUPS_DEFINITIONS_KEY = "groups:definitions";
 export const GROUPS_ASSIGNMENTS_KEY = "groups:assignments";
 export const GROUPS_COLLAPSED_KEY = "groups:collapsed";
 export const GROUPS_COLORS_KEY = "groups:colors";
+export const TAB_LAYOUT_KEY = "settings:tabLayout";
 
 // Generic store helpers
 async function loadValue<T>(key: string, defaultValue: T): Promise<T> {
@@ -55,6 +56,11 @@ export const loadCollapsedGroups = () => loadValue<string[]>(GROUPS_COLLAPSED_KE
 export const saveCollapsedGroups = (collapsedIds: string[]) => saveValue(GROUPS_COLLAPSED_KEY, collapsedIds);
 export const loadGroupColors = () => loadValue<Record<string, string>>(GROUPS_COLORS_KEY, {});
 export const saveGroupColors = (colors: Record<string, string>) => saveValue(GROUPS_COLORS_KEY, colors);
+export const loadTabLayout = async (): Promise<TabLayout> => {
+  const layout = await loadValue<unknown>(TAB_LAYOUT_KEY, "horizontal");
+  return layout === "list" ? "list" : "horizontal";
+};
+export const saveTabLayout = (layout: TabLayout) => saveValue(TAB_LAYOUT_KEY, layout);
 
 export function normalizeProjectPath(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;

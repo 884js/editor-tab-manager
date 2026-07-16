@@ -2,9 +2,10 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import Tab from "./Tab";
 import WorktreeTab from "./WorktreeTab";
+import GroupTabList from "./GroupTabList";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
-import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
+import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap, TabLayout } from "../types/editor";
 import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
 import { getInheritedRepositoryGroupId, groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
@@ -21,6 +22,7 @@ interface TabBarProps {
   tabColors?: TabColorMap;
   onColorChange?: (windowKey: string, colorId: string | null) => void;
   showBranch?: boolean;
+  tabLayout: TabLayout;
   history: HistoryEntry[];
   showAddMenu: boolean;
   onAddMenuOpen: () => void;
@@ -58,8 +60,10 @@ const getClaudeStatusForTab = (tab: EditorWindow, statuses?: Record<string, Clau
   return undefined;
 };
 
+const getListRowCount = (entries: TabEntry[]) => groupRepositoryTabs(entries).length;
+
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<{ key: string; currentColorId: string | null } | null>(null);
@@ -73,6 +77,8 @@ function TabBar(props: TabBarProps) {
   const [newGroupInput, setNewGroupInput] = useState<string | null>(null);
   const [groupColorPickerTarget, setGroupColorPickerTarget] = useState<string | null>(null);
   const [groupColorPickerAnchorLeft, setGroupColorPickerAnchorLeft] = useState<number>(0);
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const [groupListAnchorLeft, setGroupListAnchorLeft] = useState(8);
   const containerRef = useRef<HTMLDivElement>(null);
   const tabsWrapperRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -138,6 +144,38 @@ function TabBar(props: TabBarProps) {
       rect,
     });
   }, [onTabContextMenuOpen]);
+
+  const closeGroupList = useCallback(() => {
+    if (openGroupId === null) return;
+    setOpenGroupId(null);
+    void onWorktreeMenuClose();
+  }, [onWorktreeMenuClose, openGroupId]);
+
+  const toggleGroupList = useCallback((groupId: string, entries: TabEntry[], rect: DOMRect) => {
+    if (entries.length === 0) return;
+    if (openGroupId === groupId) {
+      closeGroupList();
+      return;
+    }
+    setGroupListAnchorLeft(rect.left);
+    setOpenGroupId(groupId);
+    void onWorktreeMenuOpen(getListRowCount(entries));
+  }, [closeGroupList, onWorktreeMenuOpen, openGroupId]);
+
+  const handleListTabContextMenu = useCallback((index: number, rect: DOMRect) => {
+    setOpenGroupId(null);
+    void handleTabContextMenu(index, rect);
+  }, [handleTabContextMenu]);
+
+  const handleListRepositoryContextMenu = useCallback((
+    repositoryId: string,
+    indices: number[],
+    preferredIndex: number,
+    rect: DOMRect,
+  ) => {
+    setOpenGroupId(null);
+    void handleWorktreeContextMenu(repositoryId, indices, preferredIndex, rect);
+  }, [handleWorktreeContextMenu]);
 
   const handleOpenColorPicker = useCallback(async () => {
     if (tabContextMenu && containerRef.current) {
@@ -237,9 +275,12 @@ function TabBar(props: TabBarProps) {
   }, [editingGroupId, editingGroupName, onUpdateGroup]);
 
   const handleGroupDelete = useCallback((groupId: string) => {
+    if (openGroupId === groupId) {
+      setOpenGroupId(null);
+    }
     onDeleteGroup(groupId);
     closeGroupLabelMenu();
-  }, [onDeleteGroup, closeGroupLabelMenu]);
+  }, [openGroupId, onDeleteGroup, closeGroupLabelMenu]);
 
   const handleOpenGroupColorPicker = useCallback(async (groupId: string) => {
     if (groupLabelMenu && containerRef.current) {
@@ -359,6 +400,12 @@ function TabBar(props: TabBarProps) {
     setDraggedIndex(null);
   }, [draggedIndex, groups.length, onReorder, onReorderByVisual, originalToVisual, visualOrder]);
 
+  useEffect(() => {
+    if (tabLayout === "list" || openGroupId === null) return;
+    setOpenGroupId(null);
+    void onWorktreeMenuClose();
+  }, [onWorktreeMenuClose, openGroupId, tabLayout]);
+
   const renderTab = (tab: EditorWindow, originalIndex: number) => (
     <Tab
       key={`${tab.bundle_id}:${tab.id}`}
@@ -409,6 +456,23 @@ function TabBar(props: TabBarProps) {
     );
   });
 
+  const openGroup = openGroupId
+    ? sortedGroups.find((group) => group.id === openGroupId)
+    : undefined;
+  const openGroupTabs = openGroup ? groupedTabsMap.get(openGroup.id) ?? [] : [];
+  const openGroupStatuses = new Map(
+    openGroupTabs.map(({ tab, originalIndex }) => [
+      originalIndex,
+      getClaudeStatusForTab(tab, claudeStatuses),
+    ]),
+  );
+
+  useEffect(() => {
+    if (openGroupId === null || (openGroup && openGroupTabs.length > 0)) return;
+    setOpenGroupId(null);
+    void onWorktreeMenuClose();
+  }, [onWorktreeMenuClose, openGroup, openGroupId, openGroupTabs.length]);
+
   return (
     <div ref={containerRef} style={styles.container}>
       {/* ドラッグ領域を最背面に配置（全体をカバー） */}
@@ -430,6 +494,8 @@ function TabBar(props: TabBarProps) {
         {sortedGroups.map((group, groupIndex) => {
           const groupTabs = groupedTabsMap.get(group.id) || [];
           const isCollapsed = collapsedGroups.has(group.id);
+          const isListOpen = tabLayout === "list" && openGroupId === group.id;
+          const activeGroupEntry = groupTabs.find(({ originalIndex }) => originalIndex === activeIndex);
           const groupColor = getColorById(groupColors[group.id]);
           const groupContainerStyle: React.CSSProperties = {
             ...styles.groupContainer,
@@ -468,6 +534,7 @@ function TabBar(props: TabBarProps) {
                   style={{
                     ...styles.groupLabel,
                     opacity: draggedGroupIndex === groupIndex ? 0.5 : 1,
+                    ...(tabLayout === "list" && activeGroupEntry ? styles.groupLabelActive : {}),
                     ...(groupColor ? {
                       background: toRgba(groupColor.rgb, 0.2),
                       color: groupColor.hex,
@@ -476,23 +543,39 @@ function TabBar(props: TabBarProps) {
                   draggable
                   onDragStart={(e) => handleGroupDragStart(e, groupIndex)}
                   onDragEnd={handleGroupDragEnd}
-                  onClick={() => onToggleGroupCollapse(group.id)}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    if (tabLayout === "horizontal") {
+                      onToggleGroupCollapse(group.id);
+                    } else {
+                      toggleGroupList(group.id, groupTabs, event.currentTarget.getBoundingClientRect());
+                    }
+                  }}
                   onContextMenu={(e) => handleGroupLabelContextMenu(e, group.id)}
-                  onMouseDown={(e) => e.stopPropagation()}
+                  aria-haspopup={tabLayout === "list" ? "menu" : undefined}
+                  aria-expanded={tabLayout === "list" ? isListOpen : undefined}
+                  data-tab-index={activeGroupEntry?.originalIndex}
                 >
                   <span className="group-label-text" style={styles.groupLabelText}>
                     {group.name}
                   </span>
-                  {isCollapsed && (
+                  {(tabLayout === "list" || isCollapsed) && (
                     <span className="group-badge" style={styles.groupBadge}>
                       {groupTabs.length}
+                    </span>
+                  )}
+                  {tabLayout === "list" && (
+                    <span aria-hidden="true" style={styles.groupChevron}>
+                      {isListOpen ? "⌃" : "⌄"}
                     </span>
                   )}
                 </button>
               )}
 
               {/* Group tabs (hidden when collapsed) */}
-              {!isCollapsed && renderRepositoryTabs(groupTabs)}
+              {tabLayout === "horizontal" && !isCollapsed && renderRepositoryTabs(groupTabs)}
             </div>
           );
         })}
@@ -510,6 +593,28 @@ function TabBar(props: TabBarProps) {
           +
         </button>
       </div>
+
+      {tabLayout === "list" && openGroup && openGroupTabs.length > 0 && (
+        <GroupTabList
+          name={openGroup.name}
+          entries={openGroupTabs}
+          activeIndex={activeIndex}
+          statuses={openGroupStatuses}
+          tabColors={tabColors}
+          showBranch={showBranch !== false}
+          anchorLeft={groupListAnchorLeft}
+          onTabClick={handleTabClick}
+          onCloseTab={handleCloseTab}
+          onRequestClose={closeGroupList}
+          onTabContextMenu={handleListTabContextMenu}
+          onRepositoryContextMenu={handleListRepositoryContextMenu}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onRowCountChange={onWorktreeMenuOpen}
+        />
+      )}
 
       {colorPickerTarget && (
         <ColorPicker
@@ -759,6 +864,14 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
     flexShrink: 0,
     marginLeft: "2px",
+  },
+  groupLabelActive: {
+    borderBottom: "2px solid #007aff",
+    color: "#ffffff",
+  },
+  groupChevron: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: "11px",
   },
   groupLabelText: {
     maxWidth: "80px",

@@ -25,7 +25,7 @@ const vscodeWorktree: EditorWindow = {
   editor_name: "VSCode",
 };
 
-function setup(tabColors: Record<string, string | null> = {}) {
+function setup(tabColors: Record<string, string | null> = {}, tabLayout: "horizontal" | "list" = "horizontal") {
   const onAssignTabsToGroup = vi.fn();
   const onColorChange = vi.fn();
   const props = {
@@ -45,6 +45,7 @@ function setup(tabColors: Record<string, string | null> = {}) {
     onColorPickerOpen: vi.fn().mockResolvedValue(undefined),
     onColorPickerClose: vi.fn(),
     tabColors,
+    tabLayout,
     onColorChange,
     groups: [
       { id: "medii", name: "medii", order: 0 },
@@ -123,5 +124,38 @@ describe("TabBar repository grouping", () => {
     fireEvent.click(await screen.findByTitle("tabColor.blue"));
 
     expect(onColorChange).toHaveBeenCalledWith(colorKey, "blue");
+  });
+
+  it("shows grouped worktrees as rows in list layout", () => {
+    const { props } = setup({}, "list");
+    const groupButton = screen.getByRole("button", { name: /medii/ });
+
+    expect(screen.queryByRole("button", { name: "worktree.openBranches" })).not.toBeInTheDocument();
+
+    fireEvent.click(groupButton);
+
+    expect(screen.getByRole("menu", { name: "group.tabList" })).toBeInTheDocument();
+    const repository = screen.getByRole("menuitem", { name: /medii-e-consult-front/ });
+    expect(repository).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem", { name: /main/ })).not.toBeInTheDocument();
+    expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(1);
+
+    fireEvent.click(repository);
+
+    expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
+    expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(3);
+  });
+
+  it("switches windows from the group list and closes it", () => {
+    const { props } = setup({}, "list");
+    fireEvent.click(screen.getByRole("button", { name: /medii/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /feature\/search/ }));
+
+    expect(props.onTabClick).toHaveBeenCalledWith(1);
+    expect(props.onWorktreeMenuClose).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu", { name: "group.tabList" })).not.toBeInTheDocument();
   });
 });

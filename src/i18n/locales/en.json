@@ -35,6 +35,14 @@
     "autostartDescription": "Automatically launch the app when your PC starts",
     "showBranchLabel": "Show Git Branch",
     "showBranchDescription": "Display Git branch name on tabs",
+    "tabLayoutLabel": "Tab Layout",
+    "tabLayoutDescription": "Choose how groups are displayed in the tab bar",
+    "tabLayout": {
+      "horizontal": "Horizontal",
+      "horizontalDescription": "Arrange tabs and groups horizontally",
+      "list": "List",
+      "listDescription": "Show group tabs in a list below the group"
+    },
     "version": "Version",
     "checkingUpdate": "Checking for updates...",
     "updateAvailable": "v{{version}} available",
@@ -75,6 +83,7 @@
     "daysAgo": "{{count}}d ago"
   },
   "group": {
+    "tabList": "{{name}} tabs",
     "assignToGroup": "Assign to Group",
     "createNew": "Create New Group",
     "newGroupPlaceholder": "Group name",

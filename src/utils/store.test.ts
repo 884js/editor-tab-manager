@@ -11,6 +11,7 @@ import {
   sortWindowsByOrder,
   UNIFIED_ORDER_KEY,
   UNIFIED_COLOR_KEY,
+  TAB_LAYOUT_KEY,
 } from "./store";
 
 // Reset the cached storePromise between tests by re-importing fresh module
@@ -235,6 +236,24 @@ describe("Store functions", () => {
       const { loadTabColors } = await freshImport();
       const result = await loadTabColors();
       expect(result).toEqual({});
+    });
+  });
+
+  describe("loadTabLayout / saveTabLayout", () => {
+    it("defaults invalid or missing values to horizontal", async () => {
+      const { loadTabLayout } = await freshImport();
+      expect(await loadTabLayout()).toBe("horizontal");
+
+      await mockStore.set(TAB_LAYOUT_KEY, "unknown");
+      expect(await loadTabLayout()).toBe("horizontal");
+    });
+
+    it("saves and loads list layout", async () => {
+      const { loadTabLayout, saveTabLayout } = await freshImport();
+      await saveTabLayout("list");
+
+      expect(mockStore.set).toHaveBeenCalledWith(TAB_LAYOUT_KEY, "list");
+      expect(await loadTabLayout()).toBe("list");
     });
   });
 

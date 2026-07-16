@@ -1,6 +1,8 @@
 // Tab bar height (px)
 export const TAB_BAR_HEIGHT = 36;
 
+export type TabLayout = "horizontal" | "list";
+
 export interface EditorWindow {
   id: number;
   name: string;

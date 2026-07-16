@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useLanguage } from "../hooks/useLanguage";
-import { getStore } from "../utils/store";
+import type { TabLayout } from "../types/editor";
+import { getStore, loadTabLayout, saveTabLayout } from "../utils/store";
 import VersionInfo from "./VersionInfo";
 
 function highlightJSON(json: string): React.ReactNode[] {
@@ -104,6 +106,7 @@ function Settings() {
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [showBranchEnabled, setShowBranchEnabled] = useState(true);
+  const [tabLayout, setTabLayout] = useState<TabLayout>("horizontal");
 
   useEffect(() => {
     getCurrentWindow().setTitle(t("settings.title"));
@@ -117,6 +120,7 @@ function Settings() {
         if (notif !== null && notif !== undefined) setNotificationEnabled(notif);
         const branch = await store.get<boolean>("settings:showBranch");
         if (branch !== null && branch !== undefined) setShowBranchEnabled(branch);
+        setTabLayout(await loadTabLayout());
       } catch { /* defaults */ }
       try {
         setAutostartEnabled(await isEnabled());
@@ -156,6 +160,12 @@ function Settings() {
     } catch (error) {
       console.error("Failed to save showBranch setting:", error);
     }
+  }, []);
+
+  const handleTabLayoutChange = useCallback(async (layout: TabLayout) => {
+    setTabLayout(layout);
+    await saveTabLayout(layout);
+    await emit("tab-layout-changed", layout);
   }, []);
 
   const handleCopy = useCallback(async () => {
@@ -381,6 +391,40 @@ function Settings() {
                 }}
               />
             </div>
+          </div>
+        </div>
+
+        {/* タブ表示形式 */}
+        <div style={styles.card}>
+          <div style={styles.switchLabel}>{t("settings.tabLayoutLabel")}</div>
+          <p style={{ ...styles.switchDescription, ...styles.layoutDescription }}>
+            {t("settings.tabLayoutDescription")}
+          </p>
+          <div style={styles.layoutOptions}>
+            {(["horizontal", "list"] as const).map((layout) => (
+              <label
+                key={layout}
+                style={{
+                  ...styles.layoutOption,
+                  ...(tabLayout === layout ? styles.layoutOptionActive : {}),
+                }}
+              >
+                <input
+                  type="radio"
+                  name="tab-layout"
+                  value={layout}
+                  checked={tabLayout === layout}
+                  onChange={() => handleTabLayoutChange(layout)}
+                  style={styles.layoutRadio}
+                />
+                <span style={styles.layoutOptionText}>
+                  <span style={styles.switchLabel}>{t(`settings.tabLayout.${layout}`)}</span>
+                  <span style={styles.switchDescription}>
+                    {t(`settings.tabLayout.${layout}Description`)}
+                  </span>
+                </span>
+              </label>
+            ))}
           </div>
         </div>
 
@@ -649,6 +693,40 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "12px",
     cursor: "pointer",
     flexShrink: 0,
+  },
+  layoutDescription: {
+    margin: "4px 0 12px",
+  },
+  layoutOptions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "8px",
+  },
+  layoutOption: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "8px",
+    padding: "10px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "#404040",
+    borderRadius: "6px",
+    cursor: "pointer",
+    background: "#2d2d2d",
+  },
+  layoutOptionActive: {
+    borderColor: "#0066cc",
+    background: "rgba(0, 102, 204, 0.12)",
+  },
+  layoutRadio: {
+    accentColor: "#007aff",
+    margin: "2px 0 0",
+    flexShrink: 0,
+  },
+  layoutOptionText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
   },
 };
 

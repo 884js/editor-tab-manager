@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 // ---- @tauri-apps/api/event ----
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
+  emit: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---- @tauri-apps/api/window ----
@@ -18,6 +19,8 @@ const mockAppWindow = {
   setMaxSize: vi.fn().mockResolvedValue(undefined),
   setPosition: vi.fn().mockResolvedValue(undefined),
   onMoved: vi.fn().mockResolvedValue(() => {}),
+  setTitle: vi.fn().mockResolvedValue(undefined),
+  close: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock("@tauri-apps/api/window", () => ({
