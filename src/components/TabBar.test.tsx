@@ -25,11 +25,26 @@ const vscodeWorktree: EditorWindow = {
   editor_name: "VSCode",
 };
 
-function setup(tabColors: Record<string, string | null> = {}, tabLayout: "horizontal" | "list" = "horizontal") {
+const zedWorktree: EditorWindow = {
+  id: 3,
+  name: "medii-e-consult-front",
+  path: "/Users/test/.codex/worktrees/c3d4/medii-e-consult-front",
+  branch: "fix/validation",
+  repository_id: "/Users/test/projects/medii-e-consult-front/.git",
+  repository_name: "medii-e-consult-front",
+  bundle_id: "dev.zed.Zed",
+  editor_name: "Zed",
+};
+
+function setup(
+  tabColors: Record<string, string | null> = {},
+  tabLayout: "horizontal" | "list" = "horizontal",
+  tabs: EditorWindow[] = [cursorWindow, vscodeWorktree],
+) {
   const onAssignTabsToGroup = vi.fn();
   const onColorChange = vi.fn();
   const props = {
-    tabs: [cursorWindow, vscodeWorktree],
+    tabs,
     activeIndex: 0,
     onTabClick: vi.fn(),
     onNewTab: vi.fn(),
@@ -68,8 +83,15 @@ function setup(tabColors: Record<string, string | null> = {}, tabLayout: "horizo
     onWorktreeMenuClose: vi.fn().mockResolvedValue(undefined),
   };
 
-  render(<TabBar {...props} />);
-  return { props, onAssignTabsToGroup, onColorChange };
+  const view = render(<TabBar {...props} />);
+  return {
+    props,
+    onAssignTabsToGroup,
+    onColorChange,
+    rerenderTabs: (nextTabs: EditorWindow[]) => {
+      view.rerender(<TabBar {...props} tabs={nextTabs} />);
+    },
+  };
 }
 
 describe("TabBar repository grouping", () => {
@@ -145,6 +167,29 @@ describe("TabBar repository grouping", () => {
     expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
     expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(3);
+  });
+
+  it("keeps a repository expanded after a tab closes and the list reopens", () => {
+    const { props, rerenderTabs } = setup(
+      {},
+      "list",
+      [cursorWindow, vscodeWorktree, zedWorktree],
+    );
+    const groupButton = screen.getByRole("button", { name: /medii/ });
+    fireEvent.click(groupButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "worktree.closeBranch" })[2]);
+    expect(props.onCloseTab).toHaveBeenCalledWith(2);
+    rerenderTabs([cursorWindow, vscodeWorktree]);
+
+    fireEvent.click(groupButton);
+    fireEvent.click(groupButton);
+
+    const repository = screen.getByRole("menuitem", { name: /medii-e-consult-front/ });
+    expect(repository).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
   });
 
   it("switches windows from the group list and closes it", () => {

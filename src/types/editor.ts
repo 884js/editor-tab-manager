@@ -4,6 +4,7 @@ export const TAB_BAR_HEIGHT = 36;
 export type TabLayout = "horizontal" | "list";
 
 export interface EditorWindow {
+  runtime_id?: string;
   id: number;
   name: string;
   path: string;
@@ -12,6 +13,14 @@ export interface EditorWindow {
   repository_name?: string;
   bundle_id: string;
   editor_name: string;
+  resolution?: "exact" | "inferred" | "unresolved";
+}
+
+export interface WindowsSnapshot {
+  revision: number;
+  windows: EditorWindow[];
+  active_id: number | null;
+  source: string;
 }
 
 export interface HistoryEntry {

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { getColorById } from "../constants/tabColors";
 import { EDITOR_DISPLAY_NAMES, type ClaudeStatus, type TabColorMap } from "../types/editor";
 import { groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
-import { getWindowScopedValue, legacyWindowKey } from "../utils/store";
+import { getWindowScopedValue, legacyWindowKey, runtimeWindowKey } from "../utils/store";
 
 interface GroupTabListProps {
   name: string;
@@ -14,6 +14,7 @@ interface GroupTabListProps {
   tabColors?: TabColorMap;
   showBranch: boolean;
   anchorLeft: number;
+  expandedRepositories: ReadonlySet<string>;
   onTabClick: (index: number) => void;
   onCloseTab: (index: number) => void;
   onRequestClose: () => void;
@@ -29,6 +30,7 @@ interface GroupTabListProps {
   onDragOver: (index: number) => void;
   onDrop: (index: number) => void;
   onRowCountChange: (rowCount: number) => Promise<void>;
+  onToggleRepository: (repositoryId: string) => void;
 }
 
 const MENU_WIDTH = 360;
@@ -46,6 +48,7 @@ function GroupTabList({
   tabColors,
   showBranch,
   anchorLeft,
+  expandedRepositories,
   onTabClick,
   onCloseTab,
   onRequestClose,
@@ -56,10 +59,10 @@ function GroupTabList({
   onDragOver,
   onDrop,
   onRowCountChange,
+  onToggleRepository,
 }: GroupTabListProps) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
-  const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(() => new Set());
   const items = groupRepositoryTabs(entries);
   const visibleRowCount = items.reduce(
     (count, item) => count + (
@@ -87,18 +90,6 @@ function GroupTabList({
     void onRowCountChange(visibleRowCount);
   }, [onRowCountChange, visibleRowCount]);
 
-  const toggleRepository = (repositoryId: string) => {
-    setExpandedRepositories((current) => {
-      const next = new Set(current);
-      if (next.has(repositoryId)) {
-        next.delete(repositoryId);
-      } else {
-        next.add(repositoryId);
-      }
-      return next;
-    });
-  };
-
   const renderTabRow = ({ tab, originalIndex }: TabEntry, nested = false) => {
     const isActive = originalIndex === activeIndex;
     const status = statuses.get(originalIndex);
@@ -109,7 +100,7 @@ function GroupTabList({
 
     return (
       <div
-        key={`${tab.bundle_id}:${tab.id}`}
+        key={runtimeWindowKey(tab)}
         style={{
           ...styles.row,
           ...(nested ? styles.nestedRow : {}),
@@ -213,7 +204,7 @@ function GroupTabList({
                 aria-expanded={isExpanded}
                 aria-current={isParentActive ? "page" : undefined}
                 style={styles.tabButton}
-                onClick={() => toggleRepository(item.key)}
+                onClick={() => onToggleRepository(item.key)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   onRepositoryContextMenu(

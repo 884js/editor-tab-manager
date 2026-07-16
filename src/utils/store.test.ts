@@ -7,6 +7,8 @@ import {
   normalizeProjectPath,
   projectPathMatchesWindow,
   repositoryColorKey,
+  migrateResolvedWindowKeys,
+  runtimeWindowKey,
   windowKey,
   sortWindowsByOrder,
   UNIFIED_ORDER_KEY,
@@ -51,9 +53,27 @@ describe("windowKey", () => {
     expect(windowKey(a)).not.toBe(windowKey(b));
   });
 
-  it("falls back to the legacy key when path is unavailable", () => {
-    const w = makeWindow({ name: "proj", path: "" });
-    expect(windowKey(w)).toBe(legacyWindowKey(w));
+  it("uses runtime identity when path is unavailable", () => {
+    const w = makeWindow({ name: "proj", path: "", runtime_id: "cursor:42" });
+    expect(windowKey(w)).toBe("com.microsoft.VSCode:runtime:cursor:42");
+  });
+
+  it("keeps same-named unresolved windows distinct", () => {
+    const first = makeWindow({ name: "proj", path: "", runtime_id: "cursor:42" });
+    const second = makeWindow({ name: "proj", path: "", runtime_id: "cursor:43" });
+    expect(windowKey(first)).not.toBe(windowKey(second));
+  });
+});
+
+describe("migrateResolvedWindowKeys", () => {
+  it("replaces a runtime key after the same window resolves to a path", () => {
+    const unresolved = makeWindow({ path: "", runtime_id: "cursor:42" });
+    const resolved = makeWindow({ path: "/worktrees/two/project", runtime_id: "cursor:42" });
+
+    expect(
+      migrateResolvedWindowKeys([windowKey(unresolved)], [unresolved], [resolved]),
+    ).toEqual([windowKey(resolved)]);
+    expect(runtimeWindowKey(unresolved)).toBe(runtimeWindowKey(resolved));
   });
 });
 
@@ -125,6 +145,16 @@ describe("sortWindowsByOrder", () => {
   it("handles empty order — all windows sorted alphabetically", () => {
     const result = sortWindowsByOrder([w2, w1], []);
     expect(result.map((w) => w.name)).toEqual(["alpha", "beta"]);
+  });
+
+  it("sorts same-named resolved windows by their stable path", () => {
+    const first = makeWindow({ name: "project", path: "/projects/project" });
+    const second = makeWindow({ name: "project", path: "/worktrees/project" });
+    const result = sortWindowsByOrder([second, first], []);
+    expect(result.map((window) => window.path)).toEqual([
+      "/projects/project",
+      "/worktrees/project",
+    ]);
   });
 
   it("does not mutate the original array", () => {

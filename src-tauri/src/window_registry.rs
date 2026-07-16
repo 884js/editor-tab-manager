@@ -1,7 +1,7 @@
 //! Central window registry - single source of truth for editor windows.
 //!
 //! AX events, app activation, and startup all funnel through `request_refresh()`.
-//! The registry pulls a fresh list via `editor::get_all_editor_windows()`, diffs
+//! The registry pulls a fresh list via `editor::get_all_editor_window_snapshot()`, diffs
 //! against the last snapshot, and emits `windows:snapshot` only when something
 //! actually changed.
 //!
@@ -9,14 +9,13 @@
 //! - **transient-empty retry**: if AX returns empty while editors are still
 //!   running, re-query after a brief pause before believing the empty result.
 //! - **cold-start retry**: after a refresh leaves the registry empty while an
-//!   editor is running, schedule a few more attempts. At most one chain runs
-//!   at a time (guarded by `COLD_START_RETRY_BUSY`).
+//!   editor is running, the same worker performs a few more attempts.
 
 use crate::editor::EditorWindow;
 use crate::editor_config::EDITORS;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -24,58 +23,99 @@ use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowsSnapshot {
+    pub revision: u64,
     pub windows: Vec<EditorWindow>,
     pub active_id: Option<u32>,
     pub source: String,
 }
 
 struct RegistryState {
+    revision: u64,
     windows: Vec<EditorWindow>,
     active_id: Option<u32>,
     /// Last-seen PID per editor_id. Used to detect editor restarts so we can
     /// invalidate editor.rs's workspace.json cache for the restarted editor.
     editor_pids: HashMap<String, i32>,
     app_handle: Option<AppHandle>,
+    refresh_tx: Option<Sender<String>>,
 }
 
 lazy_static::lazy_static! {
     static ref REGISTRY: Mutex<RegistryState> = Mutex::new(RegistryState {
+        revision: 0,
         windows: Vec::new(),
         active_id: None,
         editor_pids: HashMap::new(),
         app_handle: None,
+        refresh_tx: None,
     });
 }
 
-static COLD_START_RETRY_BUSY: AtomicBool = AtomicBool::new(false);
 const COLD_START_RETRIES: u32 = 6;
 const COLD_START_INTERVAL_MS: u64 = 500;
 const TRANSIENT_EMPTY_RECHECK_MS: u64 = 150;
 
 /// Initialize the registry with the Tauri AppHandle. Called once at startup.
 pub fn init(app_handle: AppHandle) {
-    let mut state = REGISTRY.lock().expect("registry mutex poisoned");
-    state.app_handle = Some(app_handle);
+    let (refresh_tx, refresh_rx) = mpsc::channel::<String>();
+    {
+        let mut state = REGISTRY.lock().expect("registry mutex poisoned");
+        state.app_handle = Some(app_handle);
+        state.refresh_tx = Some(refresh_tx);
+    }
+    thread::spawn(move || run_refresh_worker(refresh_rx));
+}
+
+fn run_refresh_worker(refresh_rx: Receiver<String>) {
+    while let Ok(mut source) = refresh_rx.recv() {
+        while let Ok(next_source) = refresh_rx.try_recv() {
+            source = next_source;
+        }
+        refresh_sync(&source);
+
+        if has_current_windows() || !any_editor_running() {
+            continue;
+        }
+        for _ in 0..COLD_START_RETRIES {
+            thread::sleep(Duration::from_millis(COLD_START_INTERVAL_MS));
+            if !any_editor_running() {
+                break;
+            }
+            source = "cold-start-retry".to_string();
+            while let Ok(next_source) = refresh_rx.try_recv() {
+                source = next_source;
+            }
+            refresh_sync(&source);
+            if has_current_windows() {
+                break;
+            }
+        }
+    }
 }
 
 /// Return the currently cached snapshot.
-pub fn snapshot() -> Vec<EditorWindow> {
-    REGISTRY
-        .lock()
-        .expect("registry mutex poisoned")
-        .windows
-        .clone()
+pub fn snapshot() -> WindowsSnapshot {
+    let state = REGISTRY.lock().expect("registry mutex poisoned");
+    WindowsSnapshot {
+        revision: state.revision,
+        windows: state.windows.clone(),
+        active_id: state.active_id,
+        source: "snapshot".to_string(),
+    }
 }
 
 /// Request an async refresh. The AX query + diff + emit runs on a background
 /// thread so callers (main thread AX observer callbacks, notification blocks)
-/// do not block. A cold-start retry chain may follow if the snapshot remains
-/// empty while editors are running.
-pub fn request_refresh(source: &'static str) {
-    thread::spawn(move || {
-        refresh_sync(source);
-        maybe_schedule_cold_start_retry();
-    });
+/// do not block. Cold-start retries run on that same worker.
+pub fn request_refresh(source: &str) {
+    let refresh_tx = REGISTRY
+        .lock()
+        .expect("registry mutex poisoned")
+        .refresh_tx
+        .clone();
+    if let Some(refresh_tx) = refresh_tx {
+        let _ = refresh_tx.send(source.to_string());
+    }
 }
 
 /// Synchronous refresh. Runs the AX query on the calling thread. Returns true
@@ -85,20 +125,15 @@ pub fn refresh_sync(source: &str) -> bool {
     // re-reading window metadata.
     reconcile_editor_pids();
 
-    let new_windows = crate::editor::get_all_editor_windows();
-    let new_active = crate::editor::get_active_window_id();
+    let (new_windows, new_active) = crate::editor::get_all_editor_window_snapshot();
 
     // Transient-empty guard: if AX returned no windows but we previously had
     // some and an editor is still running, treat this as a flicker and re-
     // query after a brief pause before believing the empty result.
-    if new_windows.is_empty()
-        && has_current_windows()
-        && any_editor_running()
-    {
+    if new_windows.is_empty() && has_current_windows() && any_editor_running() {
         thread::sleep(Duration::from_millis(TRANSIENT_EMPTY_RECHECK_MS));
-        let rechecked = crate::editor::get_all_editor_windows();
+        let (rechecked, rechecked_active) = crate::editor::get_all_editor_window_snapshot();
         if !rechecked.is_empty() {
-            let rechecked_active = crate::editor::get_active_window_id();
             return apply_snapshot(rechecked, rechecked_active, source);
         }
     }
@@ -111,21 +146,21 @@ fn apply_snapshot(
     new_active_id: Option<u32>,
     source: &str,
 ) -> bool {
-    let app_handle = {
+    let (app_handle, revision) = {
         let mut state = REGISTRY.lock().expect("registry mutex poisoned");
-        if !windows_differ(&state.windows, &new_windows)
-            && state.active_id == new_active_id
-        {
+        if !windows_differ(&state.windows, &new_windows) && state.active_id == new_active_id {
             return false;
         }
+        state.revision = state.revision.wrapping_add(1);
         state.windows = new_windows.clone();
         state.active_id = new_active_id;
-        state.app_handle.clone()
+        (state.app_handle.clone(), state.revision)
     };
 
     if let Some(handle) = app_handle {
         if let Some(window) = handle.get_webview_window("main") {
             let payload = WindowsSnapshot {
+                revision,
                 windows: new_windows,
                 active_id: new_active_id,
                 source: source.to_string(),
@@ -180,35 +215,6 @@ fn reconcile_editor_pids() {
     }
 }
 
-/// Start a cold-start retry chain if the registry is empty while editors run.
-/// Exactly one chain runs at a time.
-fn maybe_schedule_cold_start_retry() {
-    let should_retry = {
-        let state = REGISTRY.lock().expect("registry mutex poisoned");
-        state.windows.is_empty()
-    } && any_editor_running();
-
-    if !should_retry {
-        return;
-    }
-    if COLD_START_RETRY_BUSY.swap(true, Ordering::SeqCst) {
-        return;
-    }
-
-    thread::spawn(|| {
-        for _ in 0..COLD_START_RETRIES {
-            thread::sleep(Duration::from_millis(COLD_START_INTERVAL_MS));
-            if refresh_sync("cold-start-retry") {
-                break;
-            }
-            if !any_editor_running() {
-                break;
-            }
-        }
-        COLD_START_RETRY_BUSY.store(false, Ordering::SeqCst);
-    });
-}
-
 /// Two snapshots differ when length, or any identity field (id / name / branch /
 /// path / bundle_id) differs. Order is ignored — frontend reorders independently.
 fn windows_differ(a: &[EditorWindow], b: &[EditorWindow]) -> bool {
@@ -218,21 +224,20 @@ fn windows_differ(a: &[EditorWindow], b: &[EditorWindow]) -> bool {
 
     let mut a_sorted: Vec<&EditorWindow> = a.iter().collect();
     let mut b_sorted: Vec<&EditorWindow> = b.iter().collect();
-    a_sorted.sort_by_key(|w| w.id);
-    b_sorted.sort_by_key(|w| w.id);
+    a_sorted.sort_by_key(|window| (&window.bundle_id, window.id));
+    b_sorted.sort_by_key(|window| (&window.bundle_id, window.id));
 
-    a_sorted
-        .iter()
-        .zip(b_sorted.iter())
-        .any(|(wa, wb)| {
-            wa.id != wb.id
-                || wa.name != wb.name
-                || wa.branch != wb.branch
-                || wa.path != wb.path
-                || wa.repository_id != wb.repository_id
-                || wa.repository_name != wb.repository_name
-                || wa.bundle_id != wb.bundle_id
-        })
+    a_sorted.iter().zip(b_sorted.iter()).any(|(wa, wb)| {
+        wa.id != wb.id
+            || wa.runtime_id != wb.runtime_id
+            || wa.name != wb.name
+            || wa.branch != wb.branch
+            || wa.path != wb.path
+            || wa.repository_id != wb.repository_id
+            || wa.repository_name != wb.repository_name
+            || wa.bundle_id != wb.bundle_id
+            || wa.resolution != wb.resolution
+    })
 }
 
 #[cfg(test)]
@@ -241,6 +246,7 @@ mod tests {
 
     fn mk(id: u32, name: &str, bundle: &str) -> EditorWindow {
         EditorWindow {
+            runtime_id: format!("{}:{}", bundle, id),
             id,
             name: name.to_string(),
             path: String::new(),
@@ -249,6 +255,7 @@ mod tests {
             repository_name: None,
             bundle_id: bundle.to_string(),
             editor_name: String::new(),
+            resolution: crate::editor::WorkspaceResolution::Unresolved,
         }
     }
 
@@ -274,6 +281,13 @@ mod tests {
     }
 
     #[test]
+    fn reordering_across_editors_with_same_window_id_is_not_a_difference() {
+        let a = vec![mk(1, "alpha", "b1"), mk(1, "beta", "b2")];
+        let b = vec![mk(1, "beta", "b2"), mk(1, "alpha", "b1")];
+        assert!(!windows_differ(&a, &b));
+    }
+
+    #[test]
     fn length_change_is_detected() {
         let a = vec![mk(1, "alpha", "b1")];
         let b = vec![mk(1, "alpha", "b1"), mk(2, "beta", "b1")];
@@ -283,6 +297,7 @@ mod tests {
     #[test]
     fn branch_change_is_detected() {
         let a = vec![EditorWindow {
+            runtime_id: "b1:1".into(),
             id: 1,
             name: "p".into(),
             path: String::new(),
@@ -291,8 +306,10 @@ mod tests {
             repository_name: None,
             bundle_id: "b1".into(),
             editor_name: String::new(),
+            resolution: crate::editor::WorkspaceResolution::Unresolved,
         }];
         let b = vec![EditorWindow {
+            runtime_id: "b1:1".into(),
             id: 1,
             name: "p".into(),
             path: String::new(),
@@ -301,6 +318,7 @@ mod tests {
             repository_name: None,
             bundle_id: "b1".into(),
             editor_name: String::new(),
+            resolution: crate::editor::WorkspaceResolution::Unresolved,
         }];
         assert!(windows_differ(&a, &b));
     }

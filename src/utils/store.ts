@@ -70,10 +70,36 @@ export function legacyWindowKey(w: EditorWindow): string {
   return `${w.bundle_id}:${w.name}`;
 }
 
-// Unique key for a window in the unified tab bar (handles worktrees with the same project name)
+export function runtimeWindowKey(w: EditorWindow): string {
+  return w.runtime_id ?? `${w.bundle_id}:${w.id}`;
+}
+
 export function windowKey(w: EditorWindow): string {
-  const identity = w.path ? normalizeProjectPath(w.path) : w.name;
+  const identity = w.path
+    ? normalizeProjectPath(w.path)
+    : `runtime:${runtimeWindowKey(w)}`;
   return `${w.bundle_id}:${identity}`;
+}
+
+export function migrateResolvedWindowKeys(
+  order: string[],
+  currentWindows: EditorWindow[],
+  nextWindows: EditorWindow[],
+): string[] {
+  const nextByRuntimeId = new Map(
+    nextWindows.map((window) => [runtimeWindowKey(window), window]),
+  );
+  const migrations = new Map<string, string>();
+  for (const current of currentWindows) {
+    const next = nextByRuntimeId.get(runtimeWindowKey(current));
+    if (!next) continue;
+    const currentKey = windowKey(current);
+    const nextKey = windowKey(next);
+    if (currentKey !== nextKey) {
+      migrations.set(currentKey, nextKey);
+    }
+  }
+  return order.map((key) => migrations.get(key) ?? key);
 }
 
 export function repositoryColorKey(repositoryId: string): string {
@@ -107,7 +133,7 @@ export function sortWindowsByOrder(windows: EditorWindow[], order: string[]): Ed
     const indexA = orderMap.get(windowKey(a)) ?? orderMap.get(legacyWindowKey(a)) ?? Infinity;
     const indexB = orderMap.get(windowKey(b)) ?? orderMap.get(legacyWindowKey(b)) ?? Infinity;
     if (indexA === Infinity && indexB === Infinity) {
-      return a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name) || windowKey(a).localeCompare(windowKey(b));
     }
     return indexA - indexB;
   });

@@ -6,7 +6,7 @@ import GroupTabList from "./GroupTabList";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
 import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap, TabLayout } from "../types/editor";
-import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, windowKey } from "../utils/store";
+import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, runtimeWindowKey, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
 import { getInheritedRepositoryGroupId, groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
 
@@ -60,7 +60,20 @@ const getClaudeStatusForTab = (tab: EditorWindow, statuses?: Record<string, Clau
   return undefined;
 };
 
-const getListRowCount = (entries: TabEntry[]) => groupRepositoryTabs(entries).length;
+const getListRowCount = (
+  entries: TabEntry[],
+  expandedRepositories: ReadonlySet<string>,
+) => {
+  const items = groupRepositoryTabs(entries);
+  return items.reduce(
+    (count, item) => count + (
+      item.type === "repository" && expandedRepositories.has(item.key)
+        ? item.entries.length
+        : 0
+    ),
+    items.length,
+  );
+};
 
 function TabBar(props: TabBarProps) {
   const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
@@ -79,6 +92,7 @@ function TabBar(props: TabBarProps) {
   const [groupColorPickerAnchorLeft, setGroupColorPickerAnchorLeft] = useState<number>(0);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [groupListAnchorLeft, setGroupListAnchorLeft] = useState(8);
+  const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const tabsWrapperRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -151,6 +165,18 @@ function TabBar(props: TabBarProps) {
     void onWorktreeMenuClose();
   }, [onWorktreeMenuClose, openGroupId]);
 
+  const toggleRepositoryExpansion = useCallback((repositoryId: string) => {
+    setExpandedRepositories((current) => {
+      const next = new Set(current);
+      if (next.has(repositoryId)) {
+        next.delete(repositoryId);
+      } else {
+        next.add(repositoryId);
+      }
+      return next;
+    });
+  }, []);
+
   const toggleGroupList = useCallback((groupId: string, entries: TabEntry[], rect: DOMRect) => {
     if (entries.length === 0) return;
     if (openGroupId === groupId) {
@@ -159,8 +185,8 @@ function TabBar(props: TabBarProps) {
     }
     setGroupListAnchorLeft(rect.left);
     setOpenGroupId(groupId);
-    void onWorktreeMenuOpen(getListRowCount(entries));
-  }, [closeGroupList, onWorktreeMenuOpen, openGroupId]);
+    void onWorktreeMenuOpen(getListRowCount(entries, expandedRepositories));
+  }, [closeGroupList, expandedRepositories, onWorktreeMenuOpen, openGroupId]);
 
   const handleListTabContextMenu = useCallback((index: number, rect: DOMRect) => {
     setOpenGroupId(null);
@@ -408,7 +434,7 @@ function TabBar(props: TabBarProps) {
 
   const renderTab = (tab: EditorWindow, originalIndex: number) => (
     <Tab
-      key={`${tab.bundle_id}:${tab.id}`}
+      key={runtimeWindowKey(tab)}
       name={tab.name}
       isActive={originalIndex === activeIndex}
       isDragging={originalIndex === draggedIndex}
@@ -603,6 +629,7 @@ function TabBar(props: TabBarProps) {
           tabColors={tabColors}
           showBranch={showBranch !== false}
           anchorLeft={groupListAnchorLeft}
+          expandedRepositories={expandedRepositories}
           onTabClick={handleTabClick}
           onCloseTab={handleCloseTab}
           onRequestClose={closeGroupList}
@@ -613,6 +640,7 @@ function TabBar(props: TabBarProps) {
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onRowCountChange={onWorktreeMenuOpen}
+          onToggleRepository={toggleRepositoryExpansion}
         />
       )}
 

@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 // Accessibility framework types
@@ -48,6 +50,15 @@ const K_AX_TITLE_CHANGED: &str = "AXTitleChanged";
 
 // Error codes
 const K_AX_ERROR_SUCCESS: i32 = 0;
+const WORKSPACE_STATE_REFRESH_DELAY_MS: u64 = 200;
+
+fn request_registry_refresh(source: &'static str) {
+    crate::window_registry::request_refresh(source);
+    thread::spawn(|| {
+        thread::sleep(Duration::from_millis(WORKSPACE_STATE_REFRESH_DELAY_MS));
+        crate::window_registry::request_refresh("ax-event-retry");
+    });
+}
 
 // Wrapper types that implement Send + Sync for raw pointers
 // These are safe because we only access them from the main thread (via CFRunLoop)
@@ -142,13 +153,13 @@ extern "C" fn ax_observer_callback(
                         observer::cancel_pending_other_event();
                         // Emit window-focus-changed event
                         let _ = window.emit("window-focus-changed", ());
+                        request_registry_refresh("ax-focus-event");
                     }
                 }
                 K_AX_WINDOW_CREATED | K_AX_UI_ELEMENT_DESTROYED | K_AX_TITLE_CHANGED => {
                     // Delegate to the registry — it debounces via snapshot diff
                     // and only emits "windows:snapshot" when something actually changed.
-                    let _ = window;
-                    crate::window_registry::request_refresh("ax-event");
+                    request_registry_refresh("ax-event");
                 }
                 _ => {}
             }

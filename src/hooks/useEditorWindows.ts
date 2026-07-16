@@ -5,7 +5,7 @@ import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
-import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
+import type { EditorWindow, WindowsSnapshot, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
@@ -21,6 +21,8 @@ import {
   saveCollapsedGroups,
   loadGroupColors,
   saveGroupColors,
+  migrateResolvedWindowKeys,
+  runtimeWindowKey,
 } from "../utils/store";
 
 interface UseEditorWindowsParams {
@@ -70,15 +72,23 @@ function editorWindowListsDiffer(next: EditorWindow[], current: EditorWindow[]):
   return next.length !== current.length || next.some((window, index) => {
     const previous = current[index];
     return !previous ||
-      previous.id !== window.id ||
+      runtimeWindowKey(previous) !== runtimeWindowKey(window) ||
       previous.name !== window.name ||
       previous.path !== window.path ||
       previous.branch !== window.branch ||
       previous.repository_id !== window.repository_id ||
       previous.repository_name !== window.repository_name ||
       previous.bundle_id !== window.bundle_id ||
-      previous.editor_name !== window.editor_name;
+      previous.editor_name !== window.editor_name ||
+      previous.resolution !== window.resolution;
   });
+}
+
+function normalizeSnapshot(payload: WindowsSnapshot | EditorWindow[]): WindowsSnapshot {
+  if (Array.isArray(payload)) {
+    return { revision: 0, windows: payload, active_id: null, source: "legacy" };
+  }
+  return payload;
 }
 
 export function useEditorWindows({
@@ -103,6 +113,7 @@ export function useEditorWindows({
   const tabOrderRef = useRef<string[]>([]);
   const orderLoadedRef = useRef(false);
   const lastTabClickTimeRef = useRef<number>(0);
+  const lastSnapshotRevisionRef = useRef<number>(-1);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -120,7 +131,24 @@ export function useEditorWindows({
         orderLoadedRef.current = true;
       }
 
-      const result = await invoke<EditorWindow[]>("get_all_editor_windows");
+      const snapshot = normalizeSnapshot(
+        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
+      );
+      void invoke("request_windows_refresh");
+      lastSnapshotRevisionRef.current = Math.max(
+        lastSnapshotRevisionRef.current,
+        snapshot.revision,
+      );
+      const result = snapshot.windows;
+      const migratedOrder = migrateResolvedWindowKeys(
+        tabOrderRef.current,
+        windowsRef.current,
+        result,
+      );
+      if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
+        void saveTabOrder(migratedOrder);
+      }
+      tabOrderRef.current = migratedOrder;
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       const newOrder = sorted.map((w) => windowKey(w));
       const orderChanged =
@@ -139,7 +167,7 @@ export function useEditorWindows({
           return;
         }
 
-        const newKeys = new Set(sorted.map((w) => windowKey(w)));
+        const newKeys = new Set(sorted.map(windowKey));
         const disappeared = currentWindows.filter(
           (w) => !newKeys.has(windowKey(w)) && w.path
         );
@@ -164,13 +192,14 @@ export function useEditorWindows({
     }
 
     try {
-      const bundleId = currentBundleIdRef.current ?? null;
-      const state = await invoke<EditorState>("get_editor_state", { bundle_id: bundleId });
+      const snapshot = normalizeSnapshot(
+        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
+      );
 
-      if (state.active_index !== null && state.windows.length > 0) {
-        const frontmost = state.windows[state.active_index];
+      if (snapshot.active_id !== null && snapshot.windows.length > 0) {
+        const frontmost = snapshot.windows.find((window) => window.id === snapshot.active_id);
         const sortedIndex = windowsRef.current.findIndex(
-          (w) => w.id === frontmost?.id
+          (w) => runtimeWindowKey(w) === (frontmost ? runtimeWindowKey(frontmost) : "")
         );
         if (sortedIndex >= 0 && sortedIndex !== activeIndexRef.current) {
           setActiveIndex(sortedIndex);
@@ -288,7 +317,7 @@ export function useEditorWindows({
     // Find new active index
     const activeWindow = currentWindows[activeIndexRef.current];
     const newActiveIndex = activeWindow
-      ? newWindows.findIndex((w) => w.id === activeWindow.id)
+      ? newWindows.findIndex((w) => runtimeWindowKey(w) === runtimeWindowKey(activeWindow))
       : 0;
 
     setWindows(newWindows);
@@ -434,7 +463,24 @@ export function useEditorWindows({
         orderLoadedRef.current = true;
       }
 
-      const result = await invoke<EditorWindow[]>("get_all_editor_windows");
+      const snapshot = normalizeSnapshot(
+        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
+      );
+      void invoke("request_windows_refresh");
+      const result = snapshot.windows;
+      lastSnapshotRevisionRef.current = Math.max(
+        lastSnapshotRevisionRef.current,
+        snapshot.revision,
+      );
+      const migratedOrder = migrateResolvedWindowKeys(
+        tabOrderRef.current,
+        windowsRef.current,
+        result,
+      );
+      if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
+        void saveTabOrder(migratedOrder);
+      }
+      tabOrderRef.current = migratedOrder;
       const sorted = sortWindowsByOrder(result, tabOrderRef.current);
       tabOrderRef.current = sorted.map((w) => windowKey(w));
 
@@ -568,11 +614,7 @@ export function useEditorWindows({
       });
       cleanupFns.push(unlistenWindowFocus);
 
-      const unlistenSnapshot = await listen<{
-        windows: EditorWindow[];
-        active_id: number | null;
-        source: string;
-      }>("windows:snapshot", (event) => {
+      const unlistenSnapshot = await listen<WindowsSnapshot>("windows:snapshot", (event) => {
         if (!isMounted) return;
 
         if (!orderLoadedRef.current) {
@@ -581,6 +623,20 @@ export function useEditorWindows({
           return;
         }
 
+        if (event.payload.revision <= lastSnapshotRevisionRef.current) {
+          return;
+        }
+        lastSnapshotRevisionRef.current = event.payload.revision;
+
+        const migratedOrder = migrateResolvedWindowKeys(
+          tabOrderRef.current,
+          windowsRef.current,
+          event.payload.windows,
+        );
+        if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
+          void saveTabOrder(migratedOrder);
+        }
+        tabOrderRef.current = migratedOrder;
         const sorted = sortWindowsByOrder(event.payload.windows, tabOrderRef.current);
         const newOrder = sorted.map((w) => windowKey(w));
         const orderChanged =
@@ -594,7 +650,7 @@ export function useEditorWindows({
         const windowsChanged = editorWindowListsDiffer(sorted, currentWindows);
 
         if (windowsChanged) {
-          const newKeys = new Set(sorted.map((w) => windowKey(w)));
+          const newKeys = new Set(sorted.map(windowKey));
           const disappeared = currentWindows.filter(
             (w) => !newKeys.has(windowKey(w)) && w.path
           );

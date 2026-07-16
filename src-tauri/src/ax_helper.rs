@@ -4,13 +4,16 @@
 //! instead of slower AppleScript calls.
 
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
-use accessibility_sys::AXUIElementRef;
+use accessibility_sys::{AXUIElementGetPid, AXUIElementRef};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use core_graphics::window::CGWindowID;
 use objc2_app_kit::NSRunningApplication;
 use objc2_foundation::NSString;
+use std::collections::HashSet;
+
+use crate::editor_model::NativeEditorWindow;
 
 // Private API declaration for getting CGWindowID from AXUIElement
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -48,9 +51,11 @@ pub fn get_pid_by_bundle_id(bundle_id: &str) -> Option<i32> {
     None
 }
 
-/// Get all windows for an application by PID
-/// Returns a vector of (window_id, window_title, is_frontmost) tuples
-pub fn get_windows_ax(pid: i32) -> Result<Vec<(u32, String, bool)>, String> {
+pub fn get_native_windows_ax(
+    pid: i32,
+    bundle_id: &str,
+    include_renderer_pids: bool,
+) -> Result<Vec<NativeEditorWindow>, String> {
     let app = AXUIElement::application(pid);
 
     // Get windows attribute
@@ -90,10 +95,64 @@ pub fn get_windows_ax(pid: i32) -> Result<Vec<(u32, String, bool)>, String> {
             .map(|fw| windows_equal(&window, fw))
             .unwrap_or(false);
 
-        result.push((window_id, title, is_frontmost));
+        let renderer_pids = if include_renderer_pids {
+            descendant_process_ids(&window, pid)
+        } else {
+            Vec::new()
+        };
+
+        result.push(NativeEditorWindow::new(
+            bundle_id,
+            pid,
+            window_id,
+            title,
+            is_frontmost,
+            renderer_pids,
+        ));
     }
 
     Ok(result)
+}
+
+fn descendant_process_ids(window: &AXUIElement, editor_pid: i32) -> Vec<i32> {
+    const MAX_DEPTH: usize = 8;
+    const MAX_ELEMENTS: usize = 512;
+
+    fn visit(
+        element: &AXUIElement,
+        editor_pid: i32,
+        depth: usize,
+        visited: &mut usize,
+        pids: &mut HashSet<i32>,
+    ) {
+        if depth > MAX_DEPTH || *visited >= MAX_ELEMENTS {
+            return;
+        }
+        *visited += 1;
+
+        let mut pid = 0;
+        let result = unsafe { AXUIElementGetPid(element.as_concrete_TypeRef(), &mut pid) };
+        if result == 0 && pid > 0 && pid != editor_pid {
+            pids.insert(pid);
+        }
+
+        let Ok(children) = element.children() else {
+            return;
+        };
+        for child in children.iter() {
+            visit(&child, editor_pid, depth + 1, visited, pids);
+            if *visited >= MAX_ELEMENTS {
+                break;
+            }
+        }
+    }
+
+    let mut pids = HashSet::new();
+    let mut visited = 0;
+    visit(window, editor_pid, 0, &mut visited, &mut pids);
+    let mut pids = pids.into_iter().collect::<Vec<_>>();
+    pids.sort_unstable();
+    pids
 }
 
 /// Close a specific window by CGWindowID
