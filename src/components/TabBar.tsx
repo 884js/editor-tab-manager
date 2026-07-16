@@ -5,7 +5,7 @@ import WorktreeTab from "./WorktreeTab";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
 import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
-import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, windowKey } from "../utils/store";
+import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
 import { getInheritedRepositoryGroupId, groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
 
@@ -62,13 +62,13 @@ function TabBar(props: TabBarProps) {
   const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [colorPickerTarget, setColorPickerTarget] = useState<number | null>(null);
+  const [colorPickerTarget, setColorPickerTarget] = useState<{ key: string; currentColorId: string | null } | null>(null);
   const [colorPickerAnchorLeft, setColorPickerAnchorLeft] = useState<number>(0);
   const [groupLabelMenu, setGroupLabelMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
   const [draggedGroupIndex, setDraggedGroupIndex] = useState<number | null>(null);
-  const [tabContextMenu, setTabContextMenu] = useState<{ index: number; indices: number[]; x: number; y: number; rect: DOMRect } | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<{ index: number; indices: number[]; repositoryId?: string; x: number; y: number; rect: DOMRect } | null>(null);
   const [groupSubmenuOpen, setGroupSubmenuOpen] = useState(false);
   const [newGroupInput, setNewGroupInput] = useState<string | null>(null);
   const [groupColorPickerTarget, setGroupColorPickerTarget] = useState<string | null>(null);
@@ -123,6 +123,7 @@ function TabBar(props: TabBarProps) {
   }, [onTabContextMenuOpen]);
 
   const handleWorktreeContextMenu = useCallback(async (
+    repositoryId: string,
     indices: number[],
     preferredIndex: number,
     rect: DOMRect,
@@ -131,6 +132,7 @@ function TabBar(props: TabBarProps) {
     setTabContextMenu({
       index: preferredIndex,
       indices,
+      repositoryId,
       x: rect.left,
       y: rect.bottom,
       rect,
@@ -139,29 +141,35 @@ function TabBar(props: TabBarProps) {
 
   const handleOpenColorPicker = useCallback(async () => {
     if (tabContextMenu && containerRef.current) {
+      const tab = tabs[tabContextMenu.index];
+      if (!tab) return;
       const containerRect = containerRef.current.getBoundingClientRect();
       const rect = tabContextMenu.rect;
       setColorPickerAnchorLeft(rect.left - containerRect.left + rect.width / 2);
-      const idx = tabContextMenu.index;
+      const key = tabContextMenu.repositoryId
+        ? repositoryColorKey(tabContextMenu.repositoryId)
+        : windowKey(tab);
+      const currentColorId = tabContextMenu.repositoryId
+        ? tabColors?.[key] ?? null
+        : tabColors
+          ? getWindowScopedValue(tabColors, tab, tab.name) ?? null
+          : null;
       // Clear context menu state without resizing window (ColorPicker will resize)
       setTabContextMenu(null);
       setGroupSubmenuOpen(false);
       setNewGroupInput(null);
       await onColorPickerOpen();
-      setColorPickerTarget(idx);
+      setColorPickerTarget({ key, currentColorId });
     }
-  }, [tabContextMenu, onColorPickerOpen]);
+  }, [tabContextMenu, tabs, tabColors, onColorPickerOpen]);
 
   const handleColorSelect = useCallback((colorId: string | null) => {
-    if (colorPickerTarget !== null) {
-      const tab = tabs[colorPickerTarget];
-      if (tab) {
-        onColorChange?.(windowKey(tab), colorId);
-      }
+    if (colorPickerTarget) {
+      onColorChange?.(colorPickerTarget.key, colorId);
     }
     setColorPickerTarget(null);
     onColorPickerClose();
-  }, [colorPickerTarget, tabs, onColorChange, onColorPickerClose]);
+  }, [colorPickerTarget, onColorChange, onColorPickerClose]);
 
   const handleColorPickerClose = useCallback(() => {
     setColorPickerTarget(null);
@@ -389,11 +397,14 @@ function TabBar(props: TabBarProps) {
         entries={item.entries}
         activeIndex={activeIndex}
         statuses={statuses}
+        colorId={tabColors?.[repositoryColorKey(item.key)] ?? null}
         onTabClick={handleTabClick}
         onCloseTab={handleCloseTab}
         onMenuOpen={onWorktreeMenuOpen}
         onMenuClose={onWorktreeMenuClose}
-        onContextMenu={handleWorktreeContextMenu}
+        onContextMenu={(indices, preferredIndex, rect) =>
+          handleWorktreeContextMenu(item.key, indices, preferredIndex, rect)
+        }
       />
     );
   });
@@ -500,13 +511,9 @@ function TabBar(props: TabBarProps) {
         </button>
       </div>
 
-      {colorPickerTarget !== null && (
+      {colorPickerTarget && (
         <ColorPicker
-          currentColorId={
-            tabColors && tabs[colorPickerTarget]
-              ? getWindowScopedValue(tabColors, tabs[colorPickerTarget], tabs[colorPickerTarget].name) ?? null
-              : null
-          }
+          currentColorId={colorPickerTarget.currentColorId}
           onSelect={handleColorSelect}
           onClose={handleColorPickerClose}
           anchorLeft={colorPickerAnchorLeft}

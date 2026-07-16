@@ -70,6 +70,10 @@ export function windowKey(w: EditorWindow): string {
   return `${w.bundle_id}:${identity}`;
 }
 
+export function repositoryColorKey(repositoryId: string): string {
+  return `repository:${repositoryId}`;
+}
+
 export function projectPathMatchesWindow(projectPath: string, window: EditorWindow): boolean {
   const normalizedProjectPath = normalizeProjectPath(projectPath);
   if (window.path) {

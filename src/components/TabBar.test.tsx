@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { EditorWindow } from "../types/editor";
-import { windowKey } from "../utils/store";
+import { repositoryColorKey, windowKey } from "../utils/store";
 import TabBar from "./TabBar";
 
 const cursorWindow: EditorWindow = {
@@ -25,8 +25,9 @@ const vscodeWorktree: EditorWindow = {
   editor_name: "VSCode",
 };
 
-function setup() {
+function setup(tabColors: Record<string, string | null> = {}) {
   const onAssignTabsToGroup = vi.fn();
+  const onColorChange = vi.fn();
   const props = {
     tabs: [cursorWindow, vscodeWorktree],
     activeIndex: 0,
@@ -43,6 +44,8 @@ function setup() {
     onHistoryClear: vi.fn(),
     onColorPickerOpen: vi.fn().mockResolvedValue(undefined),
     onColorPickerClose: vi.fn(),
+    tabColors,
+    onColorChange,
     groups: [
       { id: "medii", name: "medii", order: 0 },
       { id: "personal", name: "personal", order: 1 },
@@ -65,7 +68,7 @@ function setup() {
   };
 
   render(<TabBar {...props} />);
-  return { props, onAssignTabsToGroup };
+  return { props, onAssignTabsToGroup, onColorChange };
 }
 
 describe("TabBar repository grouping", () => {
@@ -106,5 +109,19 @@ describe("TabBar repository grouping", () => {
         "personal",
       );
     });
+  });
+
+  it("stores and displays a color for the aggregate repository tab", async () => {
+    const colorKey = repositoryColorKey(cursorWindow.repository_id!);
+    const { onColorChange } = setup({ [colorKey]: "red" });
+    const trigger = screen.getByRole("button", { name: "worktree.openBranches" });
+
+    expect(trigger).toHaveStyle({ background: "rgb(110, 81, 83)" });
+
+    fireEvent.contextMenu(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: "tabColor.title" }));
+    fireEvent.click(await screen.findByTitle("tabColor.blue"));
+
+    expect(onColorChange).toHaveBeenCalledWith(colorKey, "blue");
   });
 });

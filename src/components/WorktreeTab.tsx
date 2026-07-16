@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { getColorById } from "../constants/tabColors";
 import { EDITOR_DISPLAY_NAMES, type ClaudeStatus } from "../types/editor";
 import type { TabEntry } from "../utils/repositoryTabs";
 
@@ -9,6 +10,7 @@ interface WorktreeTabProps {
   entries: TabEntry[];
   activeIndex: number;
   statuses: Map<number, ClaudeStatus | undefined>;
+  colorId?: string | null;
   onTabClick: (index: number) => void;
   onCloseTab: (index: number) => void;
   onMenuOpen: (rowCount: number) => Promise<void>;
@@ -17,12 +19,15 @@ interface WorktreeTabProps {
 }
 
 const MENU_WIDTH = 280;
+const blend = (base: number, color: number, ratio: number) =>
+  Math.round(base * (1 - ratio) + color * ratio);
 
 function WorktreeTab({
   name,
   entries,
   activeIndex,
   statuses,
+  colorId,
   onTabClick,
   onCloseTab,
   onMenuOpen,
@@ -42,6 +47,14 @@ function WorktreeTab({
   const showEditorNames = new Set(entries.map((entry) => entry.tab.bundle_id)).size > 1;
   const hasWaiting = entries.some((entry) => statuses.get(entry.originalIndex) === "waiting");
   const hasGenerating = entries.some((entry) => statuses.get(entry.originalIndex) === "generating");
+  const colorStyle: React.CSSProperties = {};
+  const tabColor = getColorById(colorId);
+  if (tabColor) {
+    const { r, g, b } = tabColor.rgb;
+    const base = isActive ? 72 : isOpen ? 51 : 37;
+    const ratio = isActive ? 0.25 : isOpen ? 0.2 : 0.15;
+    colorStyle.background = `rgb(${blend(base, r, ratio)}, ${blend(base, g, ratio)}, ${blend(base, b, ratio)})`;
+  }
 
   const closeMenu = useCallback(() => {
     if (!isOpen) return;
@@ -85,8 +98,8 @@ function WorktreeTab({
       if (menuRef.current?.contains(target)) return;
       closeMenu();
     };
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
+    document.addEventListener("mousedown", handlePointerDown, true);
+    return () => document.removeEventListener("mousedown", handlePointerDown, true);
   }, [closeMenu, isOpen]);
 
   return (
@@ -107,6 +120,7 @@ function WorktreeTab({
           ...styles.tab,
           ...(isOpen && !isActive ? styles.tabOpen : {}),
           ...(isActive ? styles.tabActive : {}),
+          ...colorStyle,
         }}
         onMouseDown={(event) => {
           if (event.button !== 0) return;

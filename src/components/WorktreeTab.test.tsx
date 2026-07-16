@@ -18,7 +18,7 @@ function makeEntry(index: number, branch: string, overrides: Partial<EditorWindo
   return { tab, originalIndex: index };
 }
 
-function setup() {
+function setup(colorId: string | null = null) {
   const props = {
     name: "project",
     entries: [
@@ -30,13 +30,19 @@ function setup() {
     ],
     activeIndex: 5,
     statuses: new Map([[2, "waiting" as const], [5, "generating" as const]]),
+    colorId,
     onTabClick: vi.fn(),
     onCloseTab: vi.fn(),
     onMenuOpen: vi.fn().mockResolvedValue(undefined),
     onMenuClose: vi.fn().mockResolvedValue(undefined),
     onContextMenu: vi.fn(),
   };
-  const view = render(<WorktreeTab {...props} />);
+  const view = render(
+    <>
+      <WorktreeTab {...props} />
+      <button type="button" onMouseDown={(event) => event.stopPropagation()}>other tab</button>
+    </>,
+  );
   const trigger = screen.getByRole("button", { name: "worktree.openBranches" });
   return { ...view, props, trigger, root: trigger.parentElement as HTMLElement };
 }
@@ -120,5 +126,23 @@ describe("WorktreeTab", () => {
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(props.onMenuClose).toHaveBeenCalledOnce();
+  });
+
+  it("closes before another tab stops mouse down propagation", () => {
+    const { props, trigger } = setup();
+    fireEvent.mouseDown(trigger, { button: 0 });
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "other tab" }), { button: 0 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(props.onMenuClose).toHaveBeenCalledOnce();
+
+    fireEvent.mouseDown(trigger, { button: 0 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("applies the repository color to the aggregate tab", () => {
+    const { trigger } = setup("red");
+
+    expect(trigger).toHaveStyle({ background: "rgb(110, 81, 83)" });
   });
 });

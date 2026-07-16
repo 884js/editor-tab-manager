@@ -6,6 +6,7 @@ import {
   legacyWindowKey,
   normalizeProjectPath,
   projectPathMatchesWindow,
+  repositoryColorKey,
   windowKey,
   sortWindowsByOrder,
   UNIFIED_ORDER_KEY,
@@ -52,6 +53,12 @@ describe("windowKey", () => {
   it("falls back to the legacy key when path is unavailable", () => {
     const w = makeWindow({ name: "proj", path: "" });
     expect(windowKey(w)).toBe(legacyWindowKey(w));
+  });
+});
+
+describe("repositoryColorKey", () => {
+  it("keeps repository colors separate from window colors", () => {
+    expect(repositoryColorKey("/projects/sample/.git")).toBe("repository:/projects/sample/.git");
   });
 });
 
