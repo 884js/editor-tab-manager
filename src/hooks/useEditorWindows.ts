@@ -5,7 +5,7 @@ import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
-import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment } from "../types/editor";
+import type { EditorWindow, EditorState, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
@@ -37,7 +37,7 @@ interface UseEditorWindowsParams {
 interface UseEditorWindowsReturn {
   windows: EditorWindow[];
   activeIndex: number;
-  tabColors: Record<string, string>;
+  tabColors: TabColorMap;
   groups: GroupDefinition[];
   groupAssignments: GroupAssignment;
   collapsedGroups: Set<string>;
@@ -55,15 +55,30 @@ interface UseEditorWindowsReturn {
   handleCloseTab: (index: number) => Promise<void>;
   handleReorder: (from: number, to: number) => void;
   handleReorderByVisual: (visualOrder: number[]) => void;
-  handleColorChange: (name: string, colorId: string | null) => void;
+  handleColorChange: (windowKey: string, colorId: string | null) => void;
   addGroup: (name: string) => string;
   updateGroup: (groupId: string, name: string) => void;
   deleteGroup: (groupId: string) => void;
-  assignTabToGroup: (wKey: string, groupId: string) => void;
-  unassignTabFromGroup: (wKey: string) => void;
+  assignTabsToGroup: (wKeys: string[], groupId: string) => void;
+  unassignTabsFromGroup: (wKeys: string[]) => void;
   toggleGroupCollapse: (groupId: string) => void;
   reorderGroups: (fromIndex: number, toIndex: number) => void;
   setGroupColor: (groupId: string, colorId: string | null) => void;
+}
+
+function editorWindowListsDiffer(next: EditorWindow[], current: EditorWindow[]): boolean {
+  return next.length !== current.length || next.some((window, index) => {
+    const previous = current[index];
+    return !previous ||
+      previous.id !== window.id ||
+      previous.name !== window.name ||
+      previous.path !== window.path ||
+      previous.branch !== window.branch ||
+      previous.repository_id !== window.repository_id ||
+      previous.repository_name !== window.repository_name ||
+      previous.bundle_id !== window.bundle_id ||
+      previous.editor_name !== window.editor_name;
+  });
 }
 
 export function useEditorWindows({
@@ -78,7 +93,7 @@ export function useEditorWindows({
 }: UseEditorWindowsParams): UseEditorWindowsReturn {
   const [windows, setWindows] = useState<EditorWindow[]>([]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [tabColors, setTabColors] = useState<Record<string, string>>({});
+  const [tabColors, setTabColors] = useState<TabColorMap>({});
   const [groups, setGroups] = useState<GroupDefinition[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<GroupAssignment>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -116,14 +131,7 @@ export function useEditorWindows({
       }
 
       const currentWindows = windowsRef.current;
-      const hasChanged =
-        sorted.length !== currentWindows.length ||
-        sorted.some(
-          (w, i) =>
-            currentWindows[i]?.name !== w.name ||
-            currentWindows[i]?.bundle_id !== w.bundle_id ||
-            currentWindows[i]?.branch !== w.branch
-        );
+      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
 
       if (hasChanged) {
         // Skip clearing windows on transient AX API empty response
@@ -287,13 +295,13 @@ export function useEditorWindows({
     setActiveIndex(Math.max(newActiveIndex, 0));
   }, []);
 
-  const handleColorChange = useCallback((windowName: string, colorId: string | null) => {
+  const handleColorChange = useCallback((key: string, colorId: string | null) => {
     setTabColors((prev) => {
       const next = { ...prev };
       if (colorId === null) {
-        delete next[windowName];
+        next[key] = null;
       } else {
-        next[windowName] = colorId;
+        next[key] = colorId;
       }
       saveTabColors(next);
       return next;
@@ -348,18 +356,19 @@ export function useEditorWindows({
     });
   }, []);
 
-  const assignTabToGroup = useCallback((wKey: string, groupId: string) => {
+  const assignTabsToGroup = useCallback((wKeys: string[], groupId: string) => {
     setGroupAssignments((prev) => {
-      const next = { ...prev, [wKey]: groupId };
+      const next = { ...prev };
+      for (const wKey of wKeys) next[wKey] = groupId;
       saveGroupAssignments(next);
       return next;
     });
   }, []);
 
-  const unassignTabFromGroup = useCallback((wKey: string) => {
+  const unassignTabsFromGroup = useCallback((wKeys: string[]) => {
     setGroupAssignments((prev) => {
       const next = { ...prev };
-      delete next[wKey];
+      for (const wKey of wKeys) next[wKey] = null;
       saveGroupAssignments(next);
       return next;
     });
@@ -430,14 +439,7 @@ export function useEditorWindows({
       tabOrderRef.current = sorted.map((w) => windowKey(w));
 
       const currentWindows = windowsRef.current;
-      const hasChanged =
-        sorted.length !== currentWindows.length ||
-        sorted.some(
-          (w, i) =>
-            currentWindows[i]?.name !== w.name ||
-            currentWindows[i]?.bundle_id !== w.bundle_id ||
-            currentWindows[i]?.branch !== w.branch
-        );
+      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
 
       if (hasChanged) {
         // Skip clearing windows on transient AX API empty response
@@ -589,14 +591,7 @@ export function useEditorWindows({
         }
 
         const currentWindows = windowsRef.current;
-        const windowsChanged =
-          sorted.length !== currentWindows.length ||
-          sorted.some(
-            (w, i) =>
-              currentWindows[i]?.name !== w.name ||
-              currentWindows[i]?.bundle_id !== w.bundle_id ||
-              currentWindows[i]?.branch !== w.branch
-          );
+        const windowsChanged = editorWindowListsDiffer(sorted, currentWindows);
 
         if (windowsChanged) {
           const newKeys = new Set(sorted.map((w) => windowKey(w)));
@@ -661,8 +656,8 @@ export function useEditorWindows({
     addGroup,
     updateGroup,
     deleteGroup,
-    assignTabToGroup,
-    unassignTabFromGroup,
+    assignTabsToGroup,
+    unassignTabsFromGroup,
     toggleGroupCollapse,
     reorderGroups,
     setGroupColor,

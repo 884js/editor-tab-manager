@@ -129,14 +129,16 @@ function App() {
       onAddGroup={editorWindows.addGroup}
       onUpdateGroup={editorWindows.updateGroup}
       onDeleteGroup={editorWindows.deleteGroup}
-      onAssignTabToGroup={editorWindows.assignTabToGroup}
-      onUnassignTabFromGroup={editorWindows.unassignTabFromGroup}
+      onAssignTabsToGroup={editorWindows.assignTabsToGroup}
+      onUnassignTabsFromGroup={editorWindows.unassignTabsFromGroup}
       onToggleGroupCollapse={editorWindows.toggleGroupCollapse}
       onReorderGroups={editorWindows.reorderGroups}
       groupColors={editorWindows.groupColors}
       onSetGroupColor={editorWindows.setGroupColor}
       onTabContextMenuOpen={lifecycle.handleTabContextMenuOpen}
       onTabContextMenuClose={lifecycle.handleTabContextMenuClose}
+      onWorktreeMenuOpen={lifecycle.handleWorktreeMenuOpen}
+      onWorktreeMenuClose={lifecycle.handleWorktreeMenuClose}
     />
   );
 }

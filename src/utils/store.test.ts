@@ -2,6 +2,11 @@ import { load } from "@tauri-apps/plugin-store";
 import { createMockStore } from "../test/setup";
 import type { EditorWindow } from "../types/editor";
 import {
+  getWindowScopedValue,
+  legacyWindowKey,
+  normalizeProjectPath,
+  projectPathMatchesWindow,
+  repositoryColorKey,
   windowKey,
   sortWindowsByOrder,
   UNIFIED_ORDER_KEY,
@@ -28,22 +33,68 @@ function makeWindow(overrides: Partial<EditorWindow> = {}): EditorWindow {
 // ────────────────────────────────
 
 describe("windowKey", () => {
-  it("returns bundle_id:name format", () => {
-    const w = makeWindow({ bundle_id: "com.microsoft.VSCode", name: "proj" });
-    expect(windowKey(w)).toBe("com.microsoft.VSCode:proj");
+  it("returns bundle_id:path format", () => {
+    const w = makeWindow({ bundle_id: "com.microsoft.VSCode", path: "/worktrees/one/proj" });
+    expect(windowKey(w)).toBe("com.microsoft.VSCode:/worktrees/one/proj");
   });
 
   it("handles different editors with same project name", () => {
-    const a = makeWindow({ bundle_id: "com.microsoft.VSCode", name: "proj" });
-    const b = makeWindow({ bundle_id: "dev.zed.Zed", name: "proj" });
+    const a = makeWindow({ bundle_id: "com.microsoft.VSCode", name: "proj", path: "/worktrees/one/proj" });
+    const b = makeWindow({ bundle_id: "dev.zed.Zed", name: "proj", path: "/worktrees/one/proj" });
     expect(windowKey(a)).not.toBe(windowKey(b));
+  });
+
+  it("handles same-named worktrees in the same editor", () => {
+    const a = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
+    const b = makeWindow({ name: "proj", path: "/worktrees/two/proj" });
+    expect(windowKey(a)).not.toBe(windowKey(b));
+  });
+
+  it("falls back to the legacy key when path is unavailable", () => {
+    const w = makeWindow({ name: "proj", path: "" });
+    expect(windowKey(w)).toBe(legacyWindowKey(w));
+  });
+});
+
+describe("repositoryColorKey", () => {
+  it("keeps repository colors separate from window colors", () => {
+    expect(repositoryColorKey("/projects/sample/.git")).toBe("repository:/projects/sample/.git");
+  });
+});
+
+describe("window path matching", () => {
+  it("matches the exact worktree path", () => {
+    const window = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
+    expect(projectPathMatchesWindow("/worktrees/one/proj/", window)).toBe(true);
+    expect(projectPathMatchesWindow("/worktrees/two/proj", window)).toBe(false);
+  });
+
+  it("falls back to the project name when path is unavailable", () => {
+    const window = makeWindow({ name: "proj", path: "" });
+    expect(projectPathMatchesWindow("/worktrees/one/proj", window)).toBe(true);
+  });
+
+  it("uses an explicit path value before a legacy value", () => {
+    const window = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
+    const values = { [windowKey(window)]: null, proj: "blue" };
+    expect(getWindowScopedValue(values, window, window.name)).toBeNull();
+  });
+
+  it("reads a legacy group assignment when no path-specific value exists", () => {
+    const window = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
+    const values = { [legacyWindowKey(window)]: "group-a" };
+    expect(getWindowScopedValue(values, window, legacyWindowKey(window))).toBe("group-a");
+  });
+
+  it("normalizes trailing slashes", () => {
+    expect(normalizeProjectPath("/worktrees/one/proj///")).toBe("/worktrees/one/proj");
   });
 });
 
 describe("sortWindowsByOrder", () => {
-  const w1 = makeWindow({ name: "alpha", bundle_id: "com.microsoft.VSCode" });
-  const w2 = makeWindow({ name: "beta", bundle_id: "com.microsoft.VSCode" });
-  const w3 = makeWindow({ name: "gamma", bundle_id: "dev.zed.Zed" });
+  const w1 = makeWindow({ name: "alpha", path: "/projects/alpha", bundle_id: "com.microsoft.VSCode" });
+  const w2 = makeWindow({ name: "beta", path: "/projects/beta", bundle_id: "com.microsoft.VSCode" });
+  const w3 = makeWindow({ name: "gamma", path: "/projects/gamma", bundle_id: "dev.zed.Zed" });
 
   it("sorts by custom order", () => {
     const order = [windowKey(w3), windowKey(w1), windowKey(w2)];
@@ -58,6 +109,12 @@ describe("sortWindowsByOrder", () => {
     // new windows alphabetically
     expect(result[1].name).toBe("alpha");
     expect(result[2].name).toBe("gamma");
+  });
+
+  it("supports an order saved with legacy name-based keys", () => {
+    const order = [legacyWindowKey(w2)];
+    const result = sortWindowsByOrder([w1, w2], order);
+    expect(result.map((w) => w.name)).toEqual(["beta", "alpha"]);
   });
 
   it("returns empty array for empty input", () => {

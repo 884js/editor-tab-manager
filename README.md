@@ -34,6 +34,7 @@
 - [Installation](#installation)
 - [Usage](#usage)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Git Worktrees](#git-worktrees)
   - [Claude Code Integration](#claude-code-integration)
   - [Settings](#settings)
 - [Development](#development)
@@ -57,6 +58,7 @@ While [multi-root workspaces](https://code.visualstudio.com/docs/editing/workspa
 - **Tab Bar UI** - View all editor windows in an always-visible tab bar
 - **Quick Switching** - Switch tabs instantly with `Cmd+1` through `Cmd+9`
 - **Multi-Editor Support** - Works with VSCode, Cursor, Zed, Codex, and Claude
+- **Git Worktree Grouping** - Groups linked worktrees under one repository tab, even across editors
 - **Custom Tab Order** - Drag and drop to reorder tabs; order persists across restarts
 - **Custom Tab Colors** - Right-click a tab to assign a color for visual grouping
 - **Claude Code Integration** - Badge notifications for Claude Code task status
@@ -118,6 +120,12 @@ pnpm tauri build
 ### Menu Bar
 
 The app runs in the menu bar. Click the tray icon to access settings or quit the app.
+
+### Git Worktrees
+
+Windows opened from linked Git worktrees are grouped under a single repository tab. Click the repository tab to view its branches, switch to a worktree window, or close it.
+
+Worktrees that belong to the same repository stay grouped even when they are open in different supported editors.
 
 ### Claude Code Integration
 

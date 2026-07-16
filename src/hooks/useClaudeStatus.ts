@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import i18n from "../i18n";
 import type { EditorWindow, ClaudeStatus, ClaudeStatusPayload } from "../types/editor";
+import { projectPathMatchesWindow } from "../utils/store";
 
 interface UseClaudeStatusParams {
   windowsRef: MutableRefObject<EditorWindow[]>;
@@ -50,7 +51,7 @@ export function useClaudeStatus({
       if (
         status === "waiting" &&
         !dismissedWaitingRef.current.has(path) &&
-        path.split("/").pop() === activeWindow.name
+        projectPathMatchesWindow(path, activeWindow)
       ) {
         const timerId = setTimeout(() => {
           waitingTimersRef.current.delete(path);
@@ -75,7 +76,7 @@ export function useClaudeStatus({
 
   const dismissWaitingForWindow = useCallback((window: EditorWindow) => {
     const waitingKey = Object.entries(claudeStatusesRef.current).find(
-      ([path, status]) => status === "waiting" && path.split("/").pop() === window.name
+      ([path, status]) => status === "waiting" && projectPathMatchesWindow(path, window)
     )?.[0];
     if (waitingKey) {
       dismissedWaitingRef.current.add(waitingKey);
@@ -119,8 +120,6 @@ export function useClaudeStatus({
         if (!isMounted) return;
         const projectPath = event.payload.project_path;
         if (!projectPath) return;
-        const projectName = projectPath.split("/").pop() || projectPath;
-
         const appWindow = getCurrentWindow();
         await appWindow.show();
         isVisibleRef.current = true;
@@ -141,7 +140,7 @@ export function useClaudeStatus({
 
         await new Promise((r) => setTimeout(r, 500));
 
-        const win = windowsRef.current.find((w) => w.name === projectName);
+        const win = windowsRef.current.find((w) => projectPathMatchesWindow(projectPath, w));
         if (win) {
           await invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
         } else if (windowsRef.current.length > 0) {

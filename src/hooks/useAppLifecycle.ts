@@ -33,6 +33,8 @@ interface UseAppLifecycleReturn {
   handleAddMenuClose: () => Promise<void>;
   handleTabContextMenuOpen: () => Promise<void>;
   handleTabContextMenuClose: () => Promise<void>;
+  handleWorktreeMenuOpen: (rowCount: number) => Promise<void>;
+  handleWorktreeMenuClose: () => Promise<void>;
 }
 
 function getMonitorKey(monitor: Awaited<ReturnType<typeof currentMonitor>>): string | null {
@@ -292,6 +294,10 @@ export function useAppLifecycle({
 
   const handleColorPickerOpen = useCallback(() => expandWindow(COLOR_PICKER_HEIGHT), [expandWindow]);
   const handleTabContextMenuOpen = useCallback(() => expandWindow(CONTEXT_MENU_HEIGHT), [expandWindow]);
+  const handleWorktreeMenuOpen = useCallback(
+    (rowCount: number) => expandWindow(Math.min(420, rowCount * 32 + 8)),
+    [expandWindow],
+  );
   const handleOverlayClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
 
   const handleAddMenuOpen = useCallback(async () => {
@@ -338,11 +344,12 @@ export function useAppLifecycle({
           if (app_type === "editor" && bundle_id) {
             currentBundleIdRef.current = bundle_id;
           }
+          // Keep the current size when a click activates the tab manager so the click can finish.
           if (app_type === "editor") {
             // Wait 150ms for macOS window animation to complete
             await new Promise((resolve) => setTimeout(resolve, 150));
+            await resizeTabBar();
           }
-          await resizeTabBar();
           isVisibleRef.current = true;
           if (app_type === "editor") {
             await fetchWindowsRef.current();
@@ -433,5 +440,7 @@ export function useAppLifecycle({
     handleAddMenuClose,
     handleTabContextMenuOpen,
     handleTabContextMenuClose: handleOverlayClose,
+    handleWorktreeMenuOpen,
+    handleWorktreeMenuClose: handleOverlayClose,
   };
 }
