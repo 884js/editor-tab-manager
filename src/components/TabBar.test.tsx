@@ -36,10 +36,22 @@ const zedWorktree: EditorWindow = {
   editor_name: "Zed",
 };
 
+const standaloneWindow: EditorWindow = {
+  id: 4,
+  name: "medii-e-consult-api",
+  path: "/Users/test/projects/medii-e-consult-api",
+  branch: "main",
+  bundle_id: "com.todesktop.230313mzl4w4u92",
+  editor_name: "Cursor",
+};
+
 function setup(
   tabColors: Record<string, string | null> = {},
   tabLayout: "horizontal" | "list" = "horizontal",
   tabs: EditorWindow[] = [cursorWindow, vscodeWorktree],
+  groupAssignments: Record<string, string | null> = {
+    [windowKey(cursorWindow)]: "medii",
+  },
 ) {
   const onAssignTabsToGroup = vi.fn();
   const onColorChange = vi.fn();
@@ -66,7 +78,7 @@ function setup(
       { id: "medii", name: "medii", order: 0 },
       { id: "personal", name: "personal", order: 1 },
     ],
-    groupAssignments: { [windowKey(cursorWindow)]: "medii" },
+    groupAssignments,
     collapsedGroups: new Set<string>(),
     onAddGroup: vi.fn(() => "new-group"),
     onUpdateGroup: vi.fn(),
@@ -167,6 +179,24 @@ describe("TabBar repository grouping", () => {
     expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
     expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(3);
+  });
+
+  it("shows repository worktree rows before regular tabs in list layout", () => {
+    setup(
+      {},
+      "list",
+      [standaloneWindow, cursorWindow, vscodeWorktree],
+      {
+        [windowKey(standaloneWindow)]: "medii",
+        [windowKey(cursorWindow)]: "medii",
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /medii/ }));
+
+    const items = within(screen.getByRole("menu", { name: "group.tabList" }))
+      .getAllByRole("menuitem");
+    expect(items[0]).toHaveTextContent("medii-e-consult-front");
+    expect(items[1]).toHaveTextContent("medii-e-consult-api");
   });
 
   it("keeps a repository expanded after a tab closes and the list reopens", () => {

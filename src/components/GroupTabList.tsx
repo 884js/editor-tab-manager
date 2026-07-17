@@ -63,7 +63,11 @@ function GroupTabList({
 }: GroupTabListProps) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
-  const items = groupRepositoryTabs(entries);
+  const groupedItems = groupRepositoryTabs(entries);
+  const items = [
+    ...groupedItems.filter((item) => item.type === "repository"),
+    ...groupedItems.filter((item) => item.type === "tab"),
+  ];
   const visibleRowCount = items.reduce(
     (count, item) => count + (
       item.type === "repository" && expandedRepositories.has(item.key)
