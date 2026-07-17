@@ -11,6 +11,10 @@ import { useAppLifecycle } from "./useAppLifecycle";
 let activeMockStore: ReturnType<typeof createMockStore>;
 vi.mock("../utils/store", () => ({
   getStore: () => Promise.resolve(activeMockStore),
+  loadTabLayout: async () => {
+    const layout = await activeMockStore.get("settings:tabLayout");
+    return layout === "list" ? "list" : "horizontal";
+  },
 }));
 
 type ListenHandler = (event: { payload: unknown }) => void;
@@ -203,6 +207,21 @@ describe("useAppLifecycle", () => {
       await waitFor(() => {
         expect(result.current.showBranch).toBe(false);
       });
+    });
+
+    it("loads the tab layout and applies later changes", async () => {
+      const { result, listeners } = setup({ "settings:tabLayout": "list" });
+
+      await waitFor(() => {
+        expect(result.current.tabLayout).toBe("list");
+        expect(listeners.has("tab-layout-changed")).toBe(true);
+      });
+
+      act(() => {
+        listeners.get("tab-layout-changed")?.({ payload: "horizontal" });
+      });
+
+      expect(result.current.tabLayout).toBe("horizontal");
     });
   });
 

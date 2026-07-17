@@ -1,7 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { EditorWindow, EditorState, GroupAssignment, GroupDefinition, TabColorMap } from "../types/editor";
+import type { EditorWindow, GroupAssignment, GroupDefinition, TabColorMap, WindowsSnapshot } from "../types/editor";
 import { useEditorWindows } from "./useEditorWindows";
 
 // Mock store functions directly
@@ -18,7 +18,11 @@ const mockSaveCollapsedGroups = vi.fn().mockResolvedValue(undefined);
 const mockLoadGroupColors = vi.fn<() => Promise<Record<string, string>>>().mockResolvedValue({});
 const mockSaveGroupColors = vi.fn().mockResolvedValue(undefined);
 const mockWindowKey = vi.fn((w: EditorWindow) => `${w.bundle_id}:${w.path || w.name}`);
+const mockRuntimeWindowKey = vi.fn((w: EditorWindow) => w.runtime_id ?? `${w.bundle_id}:${w.id}`);
 const mockSortWindowsByOrder = vi.fn((windows: EditorWindow[], _order: string[]) => [...windows]);
+const mockMigrateResolvedWindowKeys = vi.fn(
+  (order: string[], _current: EditorWindow[], _next: EditorWindow[]) => [...order],
+);
 
 vi.mock("../utils/store", () => ({
   loadTabOrder: (...args: unknown[]) => mockLoadTabOrder(...(args as [])),
@@ -34,6 +38,9 @@ vi.mock("../utils/store", () => ({
   loadGroupColors: (...args: unknown[]) => mockLoadGroupColors(...(args as [])),
   saveGroupColors: (...args: unknown[]) => mockSaveGroupColors(...args),
   windowKey: (w: EditorWindow) => mockWindowKey(w),
+  runtimeWindowKey: (w: EditorWindow) => mockRuntimeWindowKey(w),
+  migrateResolvedWindowKeys: (order: string[], current: EditorWindow[], next: EditorWindow[]) =>
+    mockMigrateResolvedWindowKeys(order, current, next),
   sortWindowsByOrder: (windows: EditorWindow[], order: string[]) => mockSortWindowsByOrder(windows, order),
 }));
 
@@ -92,6 +99,10 @@ describe("useEditorWindows", () => {
     mockLoadGroupColors.mockClear().mockResolvedValue({});
     mockSaveGroupColors.mockClear().mockResolvedValue(undefined);
     mockSortWindowsByOrder.mockClear().mockImplementation((windows) => [...windows]);
+    mockRuntimeWindowKey.mockClear().mockImplementation(
+      (window) => window.runtime_id ?? `${window.bundle_id}:${window.id}`,
+    );
+    mockMigrateResolvedWindowKeys.mockClear().mockImplementation((order) => [...order]);
   });
 
   it("starts with empty windows and activeIndex 0", () => {
@@ -115,7 +126,7 @@ describe("useEditorWindows", () => {
 
       expect(mockLoadTabOrder).toHaveBeenCalledOnce();
       expect(mockLoadTabColors).toHaveBeenCalledOnce();
-      expect(invoke).toHaveBeenCalledWith("get_all_editor_windows");
+      expect(invoke).toHaveBeenCalledWith("get_windows_snapshot");
       expect(result.current.windows).toHaveLength(2);
     });
 
@@ -173,7 +184,7 @@ describe("useEditorWindows", () => {
         await result.current.refreshWindows();
       });
 
-      expect(invoke).toHaveBeenCalledWith("get_all_editor_windows");
+      expect(invoke).toHaveBeenCalledWith("get_windows_snapshot");
       expect(result.current.windows).toHaveLength(1);
     });
 
@@ -246,7 +257,7 @@ describe("useEditorWindows", () => {
       const first = makeWindow({ id: 1, name: "project", path: "/worktrees/one/project" });
       const reopened = makeWindow({ id: 2, name: "project", path: "/worktrees/one/project" });
       vi.mocked(invoke).mockResolvedValue([first]);
-      const { result } = setup();
+      const { result, params } = setup();
 
       await act(async () => {
         await result.current.refreshWindows();
@@ -258,6 +269,40 @@ describe("useEditorWindows", () => {
       });
 
       expect(result.current.windows[0].id).toBe(2);
+      expect(params.addToHistory).not.toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ path: first.path })]),
+      );
+    });
+
+    it("persists the tab order when a runtime-only window resolves to a path", async () => {
+      const unresolved = makeWindow({
+        id: 1,
+        runtime_id: "cursor:42",
+        name: "project",
+        path: "",
+      });
+      const resolved = makeWindow({
+        id: 1,
+        runtime_id: "cursor:42",
+        name: "project",
+        path: "/worktrees/two/project",
+      });
+      mockLoadTabOrder.mockResolvedValue(["runtime-order-key"]);
+      vi.mocked(invoke).mockResolvedValue([unresolved]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      mockSaveTabOrder.mockClear();
+      mockMigrateResolvedWindowKeys.mockReturnValue(["resolved-order-key"]);
+      vi.mocked(invoke).mockResolvedValue([resolved]);
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      expect(mockSaveTabOrder).toHaveBeenCalledWith(["resolved-order-key"]);
     });
   });
 
@@ -274,13 +319,13 @@ describe("useEditorWindows", () => {
         await result.current.refreshWindows();
       });
 
-      // Mock get_editor_state to return beta as active
-      const editorState: EditorState = {
-        is_active: true,
+      const snapshot: WindowsSnapshot = {
+        revision: 1,
         windows: [win1, win2],
-        active_index: 1,
+        active_id: win2.id,
+        source: "test",
       };
-      vi.mocked(invoke).mockResolvedValue(editorState);
+      vi.mocked(invoke).mockResolvedValue(snapshot);
 
       await act(async () => {
         await result.current.syncActiveTab();
@@ -308,12 +353,13 @@ describe("useEditorWindows", () => {
       });
 
       // Immediately try to sync — should be debounced
-      const editorState: EditorState = {
-        is_active: true,
+      const snapshot: WindowsSnapshot = {
+        revision: 1,
         windows: [win1, win2],
-        active_index: 0,
+        active_id: win1.id,
+        source: "test",
       };
-      vi.mocked(invoke).mockResolvedValue(editorState);
+      vi.mocked(invoke).mockResolvedValue(snapshot);
 
       await act(async () => {
         await result.current.syncActiveTab();
@@ -544,6 +590,37 @@ describe("useEditorWindows", () => {
     it("sets up windows:snapshot listener", async () => {
       const { listeners } = setup();
       await waitFor(() => expect(listeners.has("windows:snapshot")).toBe(true));
+    });
+
+    it("ignores an older snapshot revision", async () => {
+      const current = makeWindow({ id: 1, name: "current" });
+      const stale = makeWindow({ id: 2, name: "stale" });
+      const snapshot: WindowsSnapshot = {
+        revision: 2,
+        windows: [current],
+        active_id: current.id,
+        source: "test",
+      };
+      vi.mocked(invoke).mockResolvedValue(snapshot);
+      const { result, listeners } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+      await waitFor(() => expect(listeners.has("windows:snapshot")).toBe(true));
+
+      act(() => {
+        listeners.get("windows:snapshot")!({
+          payload: {
+            revision: 1,
+            windows: [stale],
+            active_id: stale.id,
+            source: "test",
+          },
+        });
+      });
+
+      expect(result.current.windows[0].name).toBe("current");
     });
 
     it("cleans up listeners on unmount", async () => {

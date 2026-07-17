@@ -35,6 +35,14 @@
     "autostartDescription": "PCの起動時にアプリを自動的に起動します",
     "showBranchLabel": "Gitブランチ名を表示",
     "showBranchDescription": "タブにGitブランチ名を表示します",
+    "tabLayoutLabel": "タブの表示形式",
+    "tabLayoutDescription": "タブバーでグループを表示する方法を選択します",
+    "tabLayout": {
+      "horizontal": "横並び",
+      "horizontalDescription": "タブとグループを横方向に並べます",
+      "list": "リスト",
+      "listDescription": "グループの下にタブを一覧表示します"
+    },
     "version": "バージョン",
     "checkingUpdate": "更新を確認中...",
     "updateAvailable": "v{{version}} が利用可能",
@@ -75,6 +83,7 @@
     "daysAgo": "{{count}}日前"
   },
   "group": {
+    "tabList": "{{name}}のタブ",
     "assignToGroup": "グループに割り当て",
     "createNew": "新規グループ作成",
     "newGroupPlaceholder": "グループ名",

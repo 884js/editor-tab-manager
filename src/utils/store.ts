@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
-import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, TabColorMap } from "../types/editor";
+import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, TabColorMap, TabLayout } from "../types/editor";
 
 // Store instance (lazily initialized)
 let storePromise: Promise<Store> | null = null;
@@ -21,6 +21,7 @@ export const GROUPS_DEFINITIONS_KEY = "groups:definitions";
 export const GROUPS_ASSIGNMENTS_KEY = "groups:assignments";
 export const GROUPS_COLLAPSED_KEY = "groups:collapsed";
 export const GROUPS_COLORS_KEY = "groups:colors";
+export const TAB_LAYOUT_KEY = "settings:tabLayout";
 
 // Generic store helpers
 async function loadValue<T>(key: string, defaultValue: T): Promise<T> {
@@ -55,6 +56,11 @@ export const loadCollapsedGroups = () => loadValue<string[]>(GROUPS_COLLAPSED_KE
 export const saveCollapsedGroups = (collapsedIds: string[]) => saveValue(GROUPS_COLLAPSED_KEY, collapsedIds);
 export const loadGroupColors = () => loadValue<Record<string, string>>(GROUPS_COLORS_KEY, {});
 export const saveGroupColors = (colors: Record<string, string>) => saveValue(GROUPS_COLORS_KEY, colors);
+export const loadTabLayout = async (): Promise<TabLayout> => {
+  const layout = await loadValue<unknown>(TAB_LAYOUT_KEY, "horizontal");
+  return layout === "list" ? "list" : "horizontal";
+};
+export const saveTabLayout = (layout: TabLayout) => saveValue(TAB_LAYOUT_KEY, layout);
 
 export function normalizeProjectPath(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
@@ -64,10 +70,36 @@ export function legacyWindowKey(w: EditorWindow): string {
   return `${w.bundle_id}:${w.name}`;
 }
 
-// Unique key for a window in the unified tab bar (handles worktrees with the same project name)
+export function runtimeWindowKey(w: EditorWindow): string {
+  return w.runtime_id ?? `${w.bundle_id}:${w.id}`;
+}
+
 export function windowKey(w: EditorWindow): string {
-  const identity = w.path ? normalizeProjectPath(w.path) : w.name;
+  const identity = w.path
+    ? normalizeProjectPath(w.path)
+    : `runtime:${runtimeWindowKey(w)}`;
   return `${w.bundle_id}:${identity}`;
+}
+
+export function migrateResolvedWindowKeys(
+  order: string[],
+  currentWindows: EditorWindow[],
+  nextWindows: EditorWindow[],
+): string[] {
+  const nextByRuntimeId = new Map(
+    nextWindows.map((window) => [runtimeWindowKey(window), window]),
+  );
+  const migrations = new Map<string, string>();
+  for (const current of currentWindows) {
+    const next = nextByRuntimeId.get(runtimeWindowKey(current));
+    if (!next) continue;
+    const currentKey = windowKey(current);
+    const nextKey = windowKey(next);
+    if (currentKey !== nextKey) {
+      migrations.set(currentKey, nextKey);
+    }
+  }
+  return order.map((key) => migrations.get(key) ?? key);
 }
 
 export function repositoryColorKey(repositoryId: string): string {
@@ -101,7 +133,7 @@ export function sortWindowsByOrder(windows: EditorWindow[], order: string[]): Ed
     const indexA = orderMap.get(windowKey(a)) ?? orderMap.get(legacyWindowKey(a)) ?? Infinity;
     const indexB = orderMap.get(windowKey(b)) ?? orderMap.get(legacyWindowKey(b)) ?? Infinity;
     if (indexA === Infinity && indexB === Infinity) {
-      return a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name) || windowKey(a).localeCompare(windowKey(b));
     }
     return indexA - indexB;
   });

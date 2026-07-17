@@ -117,6 +117,7 @@ function App() {
       onColorPickerOpen={lifecycle.handleColorPickerOpen}
       onColorPickerClose={lifecycle.handleColorPickerClose}
       showBranch={lifecycle.showBranch}
+      tabLayout={lifecycle.tabLayout}
       history={history.history}
       showAddMenu={history.showAddMenu}
       onAddMenuOpen={lifecycle.handleAddMenuOpen}

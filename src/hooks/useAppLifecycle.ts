@@ -6,7 +6,8 @@ import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
 import type { AppActivationPayload } from "../types/editor";
-import { getStore } from "../utils/store";
+import type { TabLayout } from "../types/editor";
+import { getStore, loadTabLayout } from "../utils/store";
 
 interface UseAppLifecycleParams {
   fetchWindowsRef: MutableRefObject<() => Promise<number>>;
@@ -26,6 +27,7 @@ interface UseAppLifecycleReturn {
   handlePermissionGranted: () => void;
   handleOnboardingComplete: (dontShowAgain: boolean) => Promise<void>;
   showBranch: boolean;
+  tabLayout: TabLayout;
   resizeTabBar: () => Promise<void>;
   handleColorPickerOpen: () => Promise<void>;
   handleColorPickerClose: () => Promise<void>;
@@ -63,6 +65,7 @@ export function useAppLifecycle({
   const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState<boolean | null>(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
   const [showBranch, setShowBranch] = useState(true);
+  const [tabLayout, setTabLayout] = useState<TabLayout>("horizontal");
   const isInitializedRef = useRef(false);
   const lastMonitorKeyRef = useRef<string | null>(null);
 
@@ -79,6 +82,7 @@ export function useAppLifecycle({
         if (savedBranch !== null && savedBranch !== undefined) {
           setShowBranch(savedBranch);
         }
+        setTabLayout(await loadTabLayout());
         const savedLang = await store.get<string>("language");
         if (savedLang && savedLang !== i18n.language) {
           await i18n.changeLanguage(savedLang);
@@ -88,6 +92,16 @@ export function useAppLifecycle({
       }
     };
     init();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<TabLayout>("tab-layout-changed", (event) => {
+      setTabLayout(event.payload === "list" ? "list" : "horizontal");
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+    return () => unlisten?.();
   }, []);
 
   // Update tray menu when language changes
@@ -433,6 +447,7 @@ export function useAppLifecycle({
     handlePermissionGranted,
     handleOnboardingComplete,
     showBranch,
+    tabLayout,
     resizeTabBar,
     handleColorPickerOpen,
     handleColorPickerClose: handleOverlayClose,

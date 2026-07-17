@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { getColorById } from "../constants/tabColors";
 import { EDITOR_DISPLAY_NAMES, type ClaudeStatus } from "../types/editor";
 import type { TabEntry } from "../utils/repositoryTabs";
+import { runtimeWindowKey } from "../utils/store";
 
 interface WorktreeTabProps {
   name: string;
@@ -164,7 +165,7 @@ function WorktreeTab({
             const branchName = tab.branch || tab.name || t("app.untitled");
             const rowActive = originalIndex === activeIndex;
             return (
-              <div key={`${tab.bundle_id}:${tab.id}`} style={styles.row}>
+              <div key={runtimeWindowKey(tab)} style={styles.row}>
                 <button
                   type="button"
                   role="menuitem"

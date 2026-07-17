@@ -25,11 +25,38 @@ const vscodeWorktree: EditorWindow = {
   editor_name: "VSCode",
 };
 
-function setup(tabColors: Record<string, string | null> = {}) {
+const zedWorktree: EditorWindow = {
+  id: 3,
+  name: "medii-e-consult-front",
+  path: "/Users/test/.codex/worktrees/c3d4/medii-e-consult-front",
+  branch: "fix/validation",
+  repository_id: "/Users/test/projects/medii-e-consult-front/.git",
+  repository_name: "medii-e-consult-front",
+  bundle_id: "dev.zed.Zed",
+  editor_name: "Zed",
+};
+
+const standaloneWindow: EditorWindow = {
+  id: 4,
+  name: "medii-e-consult-api",
+  path: "/Users/test/projects/medii-e-consult-api",
+  branch: "main",
+  bundle_id: "com.todesktop.230313mzl4w4u92",
+  editor_name: "Cursor",
+};
+
+function setup(
+  tabColors: Record<string, string | null> = {},
+  tabLayout: "horizontal" | "list" = "horizontal",
+  tabs: EditorWindow[] = [cursorWindow, vscodeWorktree],
+  groupAssignments: Record<string, string | null> = {
+    [windowKey(cursorWindow)]: "medii",
+  },
+) {
   const onAssignTabsToGroup = vi.fn();
   const onColorChange = vi.fn();
   const props = {
-    tabs: [cursorWindow, vscodeWorktree],
+    tabs,
     activeIndex: 0,
     onTabClick: vi.fn(),
     onNewTab: vi.fn(),
@@ -45,12 +72,13 @@ function setup(tabColors: Record<string, string | null> = {}) {
     onColorPickerOpen: vi.fn().mockResolvedValue(undefined),
     onColorPickerClose: vi.fn(),
     tabColors,
+    tabLayout,
     onColorChange,
     groups: [
       { id: "medii", name: "medii", order: 0 },
       { id: "personal", name: "personal", order: 1 },
     ],
-    groupAssignments: { [windowKey(cursorWindow)]: "medii" },
+    groupAssignments,
     collapsedGroups: new Set<string>(),
     onAddGroup: vi.fn(() => "new-group"),
     onUpdateGroup: vi.fn(),
@@ -67,8 +95,15 @@ function setup(tabColors: Record<string, string | null> = {}) {
     onWorktreeMenuClose: vi.fn().mockResolvedValue(undefined),
   };
 
-  render(<TabBar {...props} />);
-  return { props, onAssignTabsToGroup, onColorChange };
+  const view = render(<TabBar {...props} />);
+  return {
+    props,
+    onAssignTabsToGroup,
+    onColorChange,
+    rerenderTabs: (nextTabs: EditorWindow[]) => {
+      view.rerender(<TabBar {...props} tabs={nextTabs} />);
+    },
+  };
 }
 
 describe("TabBar repository grouping", () => {
@@ -123,5 +158,79 @@ describe("TabBar repository grouping", () => {
     fireEvent.click(await screen.findByTitle("tabColor.blue"));
 
     expect(onColorChange).toHaveBeenCalledWith(colorKey, "blue");
+  });
+
+  it("shows grouped worktrees as rows in list layout", () => {
+    const { props } = setup({}, "list");
+    const groupButton = screen.getByRole("button", { name: /medii/ });
+
+    expect(screen.queryByRole("button", { name: "worktree.openBranches" })).not.toBeInTheDocument();
+
+    fireEvent.click(groupButton);
+
+    expect(screen.getByRole("menu", { name: "group.tabList" })).toBeInTheDocument();
+    const repository = screen.getByRole("menuitem", { name: /medii-e-consult-front/ });
+    expect(repository).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem", { name: /main/ })).not.toBeInTheDocument();
+    expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(1);
+
+    fireEvent.click(repository);
+
+    expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
+    expect(props.onWorktreeMenuOpen).toHaveBeenLastCalledWith(3);
+  });
+
+  it("shows repository worktree rows before regular tabs in list layout", () => {
+    setup(
+      {},
+      "list",
+      [standaloneWindow, cursorWindow, vscodeWorktree],
+      {
+        [windowKey(standaloneWindow)]: "medii",
+        [windowKey(cursorWindow)]: "medii",
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /medii/ }));
+
+    const items = within(screen.getByRole("menu", { name: "group.tabList" }))
+      .getAllByRole("menuitem");
+    expect(items[0]).toHaveTextContent("medii-e-consult-front");
+    expect(items[1]).toHaveTextContent("medii-e-consult-api");
+  });
+
+  it("keeps a repository expanded after a tab closes and the list reopens", () => {
+    const { props, rerenderTabs } = setup(
+      {},
+      "list",
+      [cursorWindow, vscodeWorktree, zedWorktree],
+    );
+    const groupButton = screen.getByRole("button", { name: /medii/ });
+    fireEvent.click(groupButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "worktree.closeBranch" })[2]);
+    expect(props.onCloseTab).toHaveBeenCalledWith(2);
+    rerenderTabs([cursorWindow, vscodeWorktree]);
+
+    fireEvent.click(groupButton);
+    fireEvent.click(groupButton);
+
+    const repository = screen.getByRole("menuitem", { name: /medii-e-consult-front/ });
+    expect(repository).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: /main/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /feature\/search/ })).toBeInTheDocument();
+  });
+
+  it("switches windows from the group list and closes it", () => {
+    const { props } = setup({}, "list");
+    fireEvent.click(screen.getByRole("button", { name: /medii/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /feature\/search/ }));
+
+    expect(props.onTabClick).toHaveBeenCalledWith(1);
+    expect(props.onWorktreeMenuClose).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu", { name: "group.tabList" })).not.toBeInTheDocument();
   });
 });

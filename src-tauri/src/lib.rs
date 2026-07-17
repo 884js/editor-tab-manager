@@ -1,8 +1,10 @@
 mod ax_helper;
 mod ax_observer;
 mod claude_status;
+mod cursor_ipc;
 mod editor;
 mod editor_config;
+mod editor_model;
 mod notification;
 mod observer;
 mod window_offset;
@@ -63,7 +65,7 @@ fn get_all_editor_windows() -> Vec<EditorWindow> {
 }
 
 #[tauri::command]
-fn get_windows_snapshot() -> Vec<EditorWindow> {
+fn get_windows_snapshot() -> window_registry::WindowsSnapshot {
     window_registry::snapshot()
 }
 
