@@ -33,6 +33,8 @@ interface UseAppLifecycleReturn {
   handleColorPickerClose: () => Promise<void>;
   handleAddMenuOpen: () => Promise<void>;
   handleAddMenuClose: () => Promise<void>;
+  handleEditorPickerOpen: () => Promise<void>;
+  handleEditorPickerClose: () => Promise<void>;
   handleTabContextMenuOpen: () => Promise<void>;
   handleTabContextMenuClose: () => Promise<void>;
   handleWorktreeMenuOpen: (rowCount: number) => Promise<void>;
@@ -305,9 +307,14 @@ export function useAppLifecycle({
   const COLOR_PICKER_HEIGHT = 50;
   const CONTEXT_MENU_HEIGHT = 200;
   const ADD_MENU_HEIGHT = 420;
+  const EDITOR_PICKER_HEIGHT = 420;
 
   const handleColorPickerOpen = useCallback(() => expandWindow(COLOR_PICKER_HEIGHT), [expandWindow]);
   const handleTabContextMenuOpen = useCallback(() => expandWindow(CONTEXT_MENU_HEIGHT), [expandWindow]);
+  const handleEditorPickerOpen = useCallback(
+    () => expandWindow(EDITOR_PICKER_HEIGHT),
+    [expandWindow],
+  );
   const handleWorktreeMenuOpen = useCallback(
     (rowCount: number) => expandWindow(Math.min(420, rowCount * 32 + 8)),
     [expandWindow],
@@ -342,6 +349,7 @@ export function useAppLifecycle({
       await appWindow.show();
       isVisibleRef.current = true;
       isInitializedRef.current = true;
+      await fetchWindowsRef.current();
       await syncActiveTabRef.current();
     };
     initWindow();
@@ -453,6 +461,8 @@ export function useAppLifecycle({
     handleColorPickerClose: handleOverlayClose,
     handleAddMenuOpen,
     handleAddMenuClose,
+    handleEditorPickerOpen,
+    handleEditorPickerClose: handleOverlayClose,
     handleTabContextMenuOpen,
     handleTabContextMenuClose: handleOverlayClose,
     handleWorktreeMenuOpen,

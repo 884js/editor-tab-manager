@@ -96,7 +96,7 @@ describe("WorktreeTab", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: /main/ }));
 
-    expect(props.onTabClick).toHaveBeenCalledWith(2);
+    expect(props.onTabClick).toHaveBeenCalledWith(2, expect.anything());
     expect(props.onMenuClose).toHaveBeenCalledOnce();
   });
 

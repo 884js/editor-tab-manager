@@ -59,15 +59,18 @@ function setup(
     tabs,
     activeIndex: 0,
     onTabClick: vi.fn(),
-    onNewTab: vi.fn(),
+    onNewTab: vi.fn().mockResolvedValue(true),
     onCloseTab: vi.fn(),
     onReorder: vi.fn(),
     onReorderByVisual: vi.fn(),
     history: [],
     showAddMenu: false,
     onAddMenuOpen: vi.fn(),
-    onAddMenuClose: vi.fn(),
-    onHistorySelect: vi.fn(),
+    onAddMenuClose: vi.fn().mockResolvedValue(undefined),
+    onEditorPickerOpen: vi.fn().mockResolvedValue(undefined),
+    onEditorPickerClose: vi.fn().mockResolvedValue(undefined),
+    onHistorySelect: vi.fn().mockResolvedValue(true),
+    onClosedTabOpen: vi.fn().mockResolvedValue(true),
     onHistoryClear: vi.fn(),
     onColorPickerOpen: vi.fn().mockResolvedValue(undefined),
     onColorPickerClose: vi.fn(),
@@ -124,6 +127,26 @@ describe("TabBar repository grouping", () => {
     expect(within(group as HTMLElement).getByRole("button", {
       name: "worktree.openBranches",
     })).toBeInTheDocument();
+  });
+
+  it("restores a legacy group assignment left under another editor", () => {
+    const movedTab = {
+      ...standaloneWindow,
+      bundle_id: "com.microsoft.VSCode",
+      editor_name: "VSCode",
+      is_open: false,
+    };
+    setup(
+      {},
+      "horizontal",
+      [movedTab],
+      { [`${standaloneWindow.bundle_id}:${standaloneWindow.name}`]: "medii" },
+    );
+
+    const group = screen.getByRole("button", { name: "medii" })
+      .closest(".tab-group");
+    expect(within(group as HTMLElement).getByTitle("tabBar.closedTooltip"))
+      .toBeInTheDocument();
   });
 
   it("assigns every repository window from the parent context menu", async () => {
@@ -209,7 +232,7 @@ describe("TabBar repository grouping", () => {
     fireEvent.click(groupButton);
     fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
 
-    fireEvent.click(screen.getAllByRole("button", { name: "worktree.closeBranch" })[2]);
+    fireEvent.click(screen.getAllByRole("button", { name: "tabBar.removeTooltip" })[2]);
     expect(props.onCloseTab).toHaveBeenCalledWith(2);
     rerenderTabs([cursorWindow, vscodeWorktree]);
 
@@ -232,5 +255,48 @@ describe("TabBar repository grouping", () => {
     expect(props.onTabClick).toHaveBeenCalledWith(1);
     expect(props.onWorktreeMenuClose).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu", { name: "group.tabList" })).not.toBeInTheDocument();
+  });
+
+  it("shows an editor picker when clicking a closed tab", async () => {
+    const closedTab = { ...standaloneWindow, is_open: false };
+    const { props } = setup({}, "horizontal", [closedTab], {});
+
+    const tab = screen.getByTitle("tabBar.closedTooltip");
+    expect(tab).toHaveStyle({ opacity: "0.55" });
+    expect(screen.getByLabelText("tabBar.closedLabel")).toBeInTheDocument();
+
+    fireEvent.click(tab);
+    expect(
+      await screen.findByRole("dialog", { name: "history.chooseEditor" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cursor" }));
+    expect(props.onClosedTabOpen).toHaveBeenCalledWith(
+      0,
+      "com.todesktop.230313mzl4w4u92",
+      undefined,
+    );
+    expect(props.onTabClick).not.toHaveBeenCalled();
+  });
+
+  it("preserves an inherited group when opening a closed worktree tab", async () => {
+    const closedWorktree = { ...vscodeWorktree, is_open: false };
+    const { props } = setup(
+      {},
+      "list",
+      [cursorWindow, closedWorktree],
+      { [windowKey(cursorWindow)]: "medii" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /medii/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /medii-e-consult-front/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /feature\/search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Zed" }));
+
+    expect(props.onClosedTabOpen).toHaveBeenCalledWith(
+      1,
+      "dev.zed.Zed",
+      "medii",
+    );
   });
 });

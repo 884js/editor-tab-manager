@@ -1,14 +1,17 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { EditorWindow, GroupAssignment, GroupDefinition, TabColorMap, WindowsSnapshot } from "../types/editor";
+import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, SavedTab, TabColorMap, WindowsSnapshot } from "../types/editor";
 import { useEditorWindows } from "./useEditorWindows";
 
 // Mock store functions directly
 const mockLoadTabOrder = vi.fn<() => Promise<string[]>>().mockResolvedValue([]);
 const mockLoadTabColors = vi.fn<() => Promise<TabColorMap>>().mockResolvedValue({});
+const mockLoadSavedTabs = vi.fn<() => Promise<SavedTab[]>>().mockResolvedValue([]);
+const mockLoadHistory = vi.fn<() => Promise<HistoryEntry[]>>().mockResolvedValue([]);
 const mockSaveTabOrder = vi.fn().mockResolvedValue(undefined);
 const mockSaveTabColors = vi.fn().mockResolvedValue(undefined);
+const mockSaveSavedTabs = vi.fn().mockResolvedValue(undefined);
 const mockLoadGroups = vi.fn<() => Promise<GroupDefinition[]>>().mockResolvedValue([]);
 const mockSaveGroups = vi.fn().mockResolvedValue(undefined);
 const mockLoadGroupAssignments = vi.fn<() => Promise<GroupAssignment>>().mockResolvedValue({});
@@ -27,8 +30,11 @@ const mockMigrateResolvedWindowKeys = vi.fn(
 vi.mock("../utils/store", () => ({
   loadTabOrder: (...args: unknown[]) => mockLoadTabOrder(...(args as [])),
   loadTabColors: (...args: unknown[]) => mockLoadTabColors(...(args as [])),
+  loadSavedTabs: (...args: unknown[]) => mockLoadSavedTabs(...(args as [])),
+  loadHistory: (...args: unknown[]) => mockLoadHistory(...(args as [])),
   saveTabOrder: (...args: unknown[]) => mockSaveTabOrder(...(args as [string[]])),
   saveTabColors: (...args: unknown[]) => mockSaveTabColors(...(args as [TabColorMap])),
+  saveSavedTabs: (...args: unknown[]) => mockSaveSavedTabs(...(args as [SavedTab[]])),
   loadGroups: (...args: unknown[]) => mockLoadGroups(...(args as [])),
   saveGroups: (...args: unknown[]) => mockSaveGroups(...args),
   loadGroupAssignments: (...args: unknown[]) => mockLoadGroupAssignments(...(args as [])),
@@ -37,6 +43,8 @@ vi.mock("../utils/store", () => ({
   saveCollapsedGroups: (...args: unknown[]) => mockSaveCollapsedGroups(...args),
   loadGroupColors: (...args: unknown[]) => mockLoadGroupColors(...(args as [])),
   saveGroupColors: (...args: unknown[]) => mockSaveGroupColors(...args),
+  normalizeProjectPath: (path: string) => path.length > 1 ? path.replace(/\/+$/, "") : path,
+  legacyWindowKey: (w: EditorWindow) => `${w.bundle_id}:${w.name}`,
   windowKey: (w: EditorWindow) => mockWindowKey(w),
   runtimeWindowKey: (w: EditorWindow) => mockRuntimeWindowKey(w),
   migrateResolvedWindowKeys: (order: string[], current: EditorWindow[], next: EditorWindow[]) =>
@@ -45,10 +53,11 @@ vi.mock("../utils/store", () => ({
 }));
 
 function makeWindow(overrides: Partial<EditorWindow> = {}): EditorWindow {
+  const name = overrides.name ?? "my-project";
   return {
     id: 1,
-    name: "my-project",
-    path: "/Users/test/my-project",
+    name,
+    path: overrides.path ?? `/Users/test/${name}`,
     bundle_id: "com.microsoft.VSCode",
     editor_name: "VSCode",
     ...overrides,
@@ -88,8 +97,11 @@ describe("useEditorWindows", () => {
     vi.mocked(listen).mockClear();
     mockLoadTabOrder.mockClear().mockResolvedValue([]);
     mockLoadTabColors.mockClear().mockResolvedValue({});
+    mockLoadSavedTabs.mockClear().mockResolvedValue([]);
+    mockLoadHistory.mockClear().mockResolvedValue([]);
     mockSaveTabOrder.mockClear().mockResolvedValue(undefined);
     mockSaveTabColors.mockClear().mockResolvedValue(undefined);
+    mockSaveSavedTabs.mockClear().mockResolvedValue(undefined);
     mockLoadGroups.mockClear().mockResolvedValue([]);
     mockSaveGroups.mockClear().mockResolvedValue(undefined);
     mockLoadGroupAssignments.mockClear().mockResolvedValue({});
@@ -110,6 +122,19 @@ describe("useEditorWindows", () => {
     expect(result.current.windows).toEqual([]);
     expect(result.current.activeIndex).toBe(0);
     expect(result.current.tabColors).toEqual({});
+  });
+
+  it("opens a new window with the editor selected in the add menu", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.handleNewTab("com.todesktop.230313mzl4w4u92");
+    });
+
+    expect(invoke).toHaveBeenCalledWith("open_new_editor", {
+      bundle_id: "com.todesktop.230313mzl4w4u92",
+    });
   });
 
   describe("fetchWindows", () => {
@@ -143,6 +168,61 @@ describe("useEditorWindows", () => {
 
       // loadTabOrder should only be called once (cached)
       expect(mockLoadTabOrder).toHaveBeenCalledOnce();
+    });
+
+    it("restores saved tabs when no editor window is open", async () => {
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      expect(result.current.windows).toEqual([
+        expect.objectContaining({
+          name: "saved-project",
+          path: "/projects/saved-project",
+          is_open: false,
+        }),
+      ]);
+    });
+
+    it("migrates the previous tab order when saved tabs have not been created yet", async () => {
+      mockLoadTabOrder.mockResolvedValue([
+        "com.microsoft.VSCode:/projects/legacy-project",
+      ]);
+      mockLoadHistory.mockResolvedValue([{
+        name: "legacy-project",
+        path: "/projects/legacy-project",
+        bundleId: "com.microsoft.VSCode",
+        editorName: "VSCode",
+        timestamp: 1,
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      expect(result.current.windows).toEqual([
+        expect.objectContaining({
+          name: "legacy-project",
+          is_open: false,
+        }),
+      ]);
+      expect(mockSaveSavedTabs).toHaveBeenCalledWith([
+        expect.objectContaining({
+          path: "/projects/legacy-project",
+          bundle_id: "com.microsoft.VSCode",
+        }),
+      ]);
     });
 
     it("adjusts activeIndex when it exceeds window count", async () => {
@@ -209,6 +289,29 @@ describe("useEditorWindows", () => {
       expect(params.addToHistory).toHaveBeenCalledWith(
         expect.arrayContaining([expect.objectContaining({ name: "beta" })])
       );
+    });
+
+    it("keeps a tab after its editor window closes", async () => {
+      const win = makeWindow({ id: 1, name: "alpha", path: "/path/alpha" });
+      vi.mocked(invoke).mockResolvedValue([win]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      vi.mocked(invoke).mockResolvedValue([]);
+      await act(async () => {
+        await result.current.refreshWindows();
+      });
+
+      expect(result.current.windows).toEqual([
+        expect.objectContaining({
+          name: "alpha",
+          path: "/path/alpha",
+          is_open: false,
+        }),
+      ]);
     });
 
     it("updates a same-named window when its worktree path changes", async () => {
@@ -388,7 +491,9 @@ describe("useEditorWindows", () => {
       });
 
       expect(result.current.activeIndex).toBe(1);
-      expect(params.dismissWaitingForWindow).toHaveBeenCalledWith(win2);
+      expect(params.dismissWaitingForWindow).toHaveBeenCalledWith(
+        expect.objectContaining(win2),
+      );
       expect(invoke).toHaveBeenCalledWith("focus_editor_window", {
         bundle_id: win2.bundle_id,
         window_id: win2.id,
@@ -412,6 +517,196 @@ describe("useEditorWindows", () => {
 
       expect(invoke).not.toHaveBeenCalledWith("focus_editor_window", expect.anything());
       expect(params.dismissWaitingForWindow).not.toHaveBeenCalled();
+    });
+
+    it("reopens a saved tab in the selected editor", async () => {
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      await act(async () => {
+        await result.current.handleOpenSavedTab(0, "com.todesktop.230313mzl4w4u92");
+      });
+
+      expect(invoke).toHaveBeenCalledWith("open_project_in_editor", {
+        bundle_id: "com.todesktop.230313mzl4w4u92",
+        path: "/projects/saved-project",
+      });
+      expect(mockSaveSavedTabs).toHaveBeenCalledWith([
+        expect.objectContaining({
+          path: "/projects/saved-project",
+          bundle_id: "com.todesktop.230313mzl4w4u92",
+        }),
+      ]);
+    });
+
+    it("preserves the group when reopening a saved tab in another editor", async () => {
+      const sourceKey = "com.microsoft.VSCode:/projects/saved-project";
+      const targetKey = "com.todesktop.230313mzl4w4u92:/projects/saved-project";
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      mockLoadGroupAssignments.mockResolvedValue({
+        [sourceKey]: "group-1",
+      });
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      await act(async () => {
+        await result.current.handleOpenSavedTab(0, "com.todesktop.230313mzl4w4u92");
+      });
+
+      expect(result.current.groupAssignments).toEqual({
+        [targetKey]: "group-1",
+      });
+      expect(mockSaveGroupAssignments).toHaveBeenCalledWith({
+        [targetKey]: "group-1",
+      });
+    });
+
+    it("uses the displayed group when reopening an inherited grouped tab", async () => {
+      const targetKey = "dev.zed.Zed:/projects/saved-project";
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      vi.mocked(invoke).mockResolvedValue(undefined);
+      await act(async () => {
+        await result.current.handleOpenSavedTab(0, "dev.zed.Zed", "group-1");
+      });
+
+      expect(result.current.groupAssignments).toEqual({
+        [targetKey]: "group-1",
+      });
+      expect(mockSaveGroupAssignments).toHaveBeenCalledWith({
+        [targetKey]: "group-1",
+      });
+    });
+
+    it("marks a saved tab when reopening it fails", async () => {
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(invoke).mockRejectedValue(new Error("open failed"));
+      await act(async () => {
+        await result.current.handleOpenSavedTab(0, "dev.zed.Zed");
+      });
+
+      expect(result.current.windows[0].open_error).toBe(true);
+      expect(result.current.windows[0].bundle_id).toBe("dev.zed.Zed");
+      consoleError.mockRestore();
+    });
+
+    it("does not reopen a saved tab until an editor is selected", async () => {
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/projects/saved-project",
+        bundle_id: "com.microsoft.VSCode",
+        editor_name: "VSCode",
+      }]);
+      vi.mocked(invoke).mockResolvedValue([]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      vi.mocked(invoke).mockClear();
+      act(() => {
+        result.current.handleTabClick(0);
+      });
+
+      expect(invoke).not.toHaveBeenCalledWith("open_project_in_editor", expect.anything());
+    });
+
+    it("focuses an existing selected-editor window and merges the closed duplicate", async () => {
+      const path = "/projects/shared-project";
+      mockLoadSavedTabs.mockResolvedValue([
+        {
+          name: "shared-project",
+          path,
+          bundle_id: "com.microsoft.VSCode",
+          editor_name: "VSCode",
+        },
+        {
+          name: "shared-project",
+          path,
+          bundle_id: "com.todesktop.230313mzl4w4u92",
+          editor_name: "Cursor",
+        },
+      ]);
+      const cursorWindow = makeWindow({
+        id: 2,
+        name: "shared-project",
+        path,
+        bundle_id: "com.todesktop.230313mzl4w4u92",
+        editor_name: "Cursor",
+      });
+      vi.mocked(invoke).mockResolvedValue([cursorWindow]);
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      const closedIndex = result.current.windows.findIndex(
+        (window) => window.bundle_id === "com.microsoft.VSCode",
+      );
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue(undefined);
+
+      await act(async () => {
+        await result.current.handleOpenSavedTab(
+          closedIndex,
+          "com.todesktop.230313mzl4w4u92",
+        );
+      });
+
+      expect(invoke).toHaveBeenCalledWith("focus_editor_window", {
+        bundle_id: "com.todesktop.230313mzl4w4u92",
+        window_id: 2,
+      });
+      expect(invoke).not.toHaveBeenCalledWith("open_project_in_editor", expect.anything());
+      expect(result.current.windows).toHaveLength(1);
     });
   });
 
@@ -466,6 +761,7 @@ describe("useEditorWindows", () => {
       await act(async () => {
         await result.current.refreshWindows();
       });
+      mockSaveTabOrder.mockClear();
 
       act(() => {
         result.current.handleReorder(-1, 0);

@@ -1,5 +1,4 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { invoke } from "@tauri-apps/api/core";
 import type { EditorWindow, HistoryEntry } from "../types/editor";
 import { MAX_HISTORY_ENTRIES } from "../types/editor";
 import { useHistory } from "./useHistory";
@@ -28,18 +27,13 @@ function makeWindow(overrides: Partial<EditorWindow> = {}): EditorWindow {
 function setup(historyEntries: HistoryEntry[] = []) {
   mockLoadHistory.mockResolvedValue(historyEntries);
 
-  const refreshWindowsRef = { current: vi.fn().mockResolvedValue(undefined) };
+  const { result, rerender, unmount } = renderHook(() => useHistory());
 
-  const { result, rerender, unmount } = renderHook(() =>
-    useHistory({ refreshWindowsRef })
-  );
-
-  return { result, rerender, unmount, refreshWindowsRef };
+  return { result, rerender, unmount };
 }
 
 describe("useHistory", () => {
   beforeEach(() => {
-    vi.mocked(invoke).mockReset();
     mockLoadHistory.mockClear();
     mockSaveHistory.mockClear();
   });
@@ -51,7 +45,11 @@ describe("useHistory", () => {
     const { result } = setup(entries);
 
     await waitFor(() => {
-      expect(result.current.history).toEqual(entries);
+      expect(result.current.history).toEqual([{
+        name: "proj",
+        path: "/path/proj",
+        timestamp: 1000,
+      }]);
     });
     expect(mockLoadHistory).toHaveBeenCalledOnce();
   });
@@ -62,6 +60,27 @@ describe("useHistory", () => {
     await waitFor(() => {
       expect(result.current.history).toEqual([]);
     });
+  });
+
+  it("deduplicates stored history by project path", async () => {
+    const entries: HistoryEntry[] = [
+      { name: "proj", path: "/path/proj", bundleId: "com.todesktop.230313mzl4w4u92", editorName: "Cursor", timestamp: 2000 },
+      { name: "proj", path: "/path/proj/", bundleId: "com.microsoft.VSCode", editorName: "VSCode", timestamp: 1000 },
+    ];
+    const { result } = setup(entries);
+
+    await waitFor(() => {
+      expect(result.current.history).toEqual([{
+        name: "proj",
+        path: "/path/proj",
+        timestamp: 2000,
+      }]);
+    });
+    expect(mockSaveHistory).toHaveBeenCalledWith([{
+      name: "proj",
+      path: "/path/proj",
+      timestamp: 2000,
+    }]);
   });
 
   describe("addToHistory", () => {
@@ -80,7 +99,7 @@ describe("useHistory", () => {
       expect(result.current.history).toHaveLength(1);
       expect(result.current.history[0].name).toBe("project-a");
       expect(result.current.history[0].path).toBe("/path/a");
-      expect(result.current.history[0].bundleId).toBe("com.microsoft.VSCode");
+      expect(result.current.history[0]).not.toHaveProperty("bundleId");
     });
 
     it("skips windows without path", async () => {
@@ -98,7 +117,7 @@ describe("useHistory", () => {
       expect(result.current.history).toHaveLength(0);
     });
 
-    it("deduplicates by path+bundleId", async () => {
+    it("deduplicates by path", async () => {
       const existing: HistoryEntry[] = [
         { name: "old-name", path: "/worktrees/one/proj", bundleId: "com.microsoft.VSCode", editorName: "VSCode", timestamp: 1000 },
       ];
@@ -108,13 +127,19 @@ describe("useHistory", () => {
         expect(result.current.history).toHaveLength(1);
       });
 
-      const win = makeWindow({ name: "proj", path: "/worktrees/one/proj" });
+      const win = makeWindow({
+        name: "proj",
+        path: "/worktrees/one/proj",
+        bundle_id: "com.todesktop.230313mzl4w4u92",
+        editor_name: "Cursor",
+      });
       act(() => {
         result.current.addToHistory([win]);
       });
 
       expect(result.current.history).toHaveLength(1);
       expect(result.current.history[0].name).toBe("proj");
+      expect(result.current.history[0]).not.toHaveProperty("bundleId");
     });
 
     it("keeps same-named worktrees as separate history entries", async () => {
@@ -177,43 +202,6 @@ describe("useHistory", () => {
       expect(mockSaveHistory).toHaveBeenCalledWith(
         expect.arrayContaining([expect.objectContaining({ name: "proj" })])
       );
-    });
-  });
-
-  describe("handleOpenFromHistory", () => {
-    it("invokes open_project_in_editor and refreshes windows", async () => {
-      vi.useFakeTimers();
-      vi.mocked(invoke).mockResolvedValue(undefined);
-
-      const entry: HistoryEntry = {
-        name: "proj",
-        path: "/path/proj",
-        bundleId: "com.microsoft.VSCode",
-        editorName: "VSCode",
-        timestamp: 1000,
-      };
-      const { result, refreshWindowsRef } = setup([entry]);
-
-      await vi.waitFor(() => {
-        expect(result.current.history).toHaveLength(1);
-      });
-
-      await act(async () => {
-        await result.current.handleOpenFromHistory(entry);
-      });
-
-      expect(invoke).toHaveBeenCalledWith("open_project_in_editor", {
-        bundle_id: "com.microsoft.VSCode",
-        path: "/path/proj",
-      });
-
-      // After 1500ms, refreshWindows should be called
-      act(() => {
-        vi.advanceTimersByTime(1500);
-      });
-      expect(refreshWindowsRef.current).toHaveBeenCalled();
-
-      vi.useRealTimers();
     });
   });
 

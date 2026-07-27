@@ -790,24 +790,72 @@ pub fn open_new_editor(bundle_id: &str) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
 
-    let pid = ax_helper::get_pid_by_bundle_id(config.bundle_id)
-        .ok_or_else(|| format!("Editor not running: {}", config.display_name))?;
+    if let Some(pid) = ax_helper::get_pid_by_bundle_id(config.bundle_id) {
+        return ax_helper::open_new_window_ax(pid);
+    }
 
-    ax_helper::open_new_window_ax(pid)
+    let status = std::process::Command::new("open")
+        .arg("-a")
+        .arg(config.app_name)
+        .status()
+        .map_err(|e| format!("Failed to launch editor: {}", e))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to launch {}", config.display_name))
+    }
+}
+
+fn find_zed_cli() -> Option<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from("/usr/local/bin/zed"),
+        PathBuf::from("/opt/homebrew/bin/zed"),
+        PathBuf::from("/Applications/Zed.app/Contents/MacOS/cli"),
+    ];
+    if let Some(home_dir) = std::env::var_os("HOME") {
+        candidates.push(
+            PathBuf::from(home_dir).join("Applications/Zed.app/Contents/MacOS/cli"),
+        );
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn build_project_open_command(
+    config: &EditorConfig,
+    path: &str,
+    zed_cli: Option<&Path>,
+) -> Result<std::process::Command, String> {
+    if config.id == "zed" {
+        let cli = zed_cli.ok_or_else(|| {
+            "Zed CLI not found. Install it from Zed's command palette.".to_string()
+        })?;
+        let mut command = std::process::Command::new(cli);
+        command.arg("-n").arg(path);
+        return Ok(command);
+    }
+
+    let mut command = std::process::Command::new("open");
+    command.arg("-a").arg(config.app_name).arg(path);
+    Ok(command)
 }
 
 /// Open a project directory in a specific editor
 pub fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String> {
     let config = crate::editor_config::get_editor_by_bundle_id(bundle_id)
         .ok_or_else(|| format!("Unknown editor: {}", bundle_id))?;
+    if !Path::new(path).exists() {
+        return Err(format!("Project path does not exist: {}", path));
+    }
 
-    std::process::Command::new("open")
-        .arg("-a")
-        .arg(config.app_name)
-        .arg(path)
-        .spawn()
+    let zed_cli = (config.id == "zed").then(find_zed_cli).flatten();
+    let status = build_project_open_command(config, path, zed_cli.as_deref())?
+        .status()
         .map_err(|e| format!("Failed to open project: {}", e))?;
-    Ok(())
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to open project in {}", config.display_name))
+    }
 }
 
 /// Close a specific editor window by CGWindowID
@@ -829,6 +877,49 @@ mod tests {
 
     fn native_window(id: u32, title: &str) -> NativeEditorWindow {
         NativeEditorWindow::new("cursor", 10, id, title.to_string(), false, Vec::new())
+    }
+
+    #[test]
+    fn open_project_rejects_a_missing_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing");
+
+        let result =
+            open_project_in_editor("com.microsoft.VSCode", missing.to_str().unwrap());
+
+        assert!(result.unwrap_err().contains("Project path does not exist"));
+    }
+
+    #[test]
+    fn zed_project_command_forces_a_new_window() {
+        let config =
+            crate::editor_config::get_editor_by_bundle_id("dev.zed.Zed").unwrap();
+        let command = build_project_open_command(
+            config,
+            "/projects/word-diary",
+            Some(Path::new("/mock/zed")),
+        )
+        .unwrap();
+
+        assert_eq!(command.get_program(), "/mock/zed");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-n", "/projects/word-diary"]
+        );
+    }
+
+    #[test]
+    fn vscode_project_command_keeps_the_existing_open_behavior() {
+        let config =
+            crate::editor_config::get_editor_by_bundle_id("com.microsoft.VSCode").unwrap();
+        let command =
+            build_project_open_command(config, "/projects/api", None).unwrap();
+
+        assert_eq!(command.get_program(), "open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-a", "Visual Studio Code", "/projects/api"]
+        );
     }
 
     fn editor_session(id: u32, title: &str, path: Option<&str>) -> EditorSession {

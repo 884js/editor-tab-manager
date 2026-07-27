@@ -14,6 +14,19 @@ export interface EditorWindow {
   bundle_id: string;
   editor_name: string;
   resolution?: "exact" | "inferred" | "unresolved";
+  is_open?: boolean;
+  open_error?: boolean;
+}
+
+export interface SavedTab {
+  name: string;
+  path: string;
+  branch?: string;
+  repository_id?: string;
+  repository_name?: string;
+  bundle_id: string;
+  editor_name: string;
+  resolution?: "exact" | "inferred" | "unresolved";
 }
 
 export interface WindowsSnapshot {
@@ -26,8 +39,8 @@ export interface WindowsSnapshot {
 export interface HistoryEntry {
   name: string;       // Project name
   path: string;       // File system path
-  bundleId: string;   // Editor bundle ID
-  editorName: string; // Editor display name
+  bundleId?: string;   // Legacy editor bundle ID
+  editorName?: string; // Legacy editor display name
   timestamp: number;  // Date.now()
 }
 
@@ -39,9 +52,17 @@ export const EDITOR_DISPLAY_NAMES: Record<string, string> = {
   "com.anthropic.claudefordesktop": "Claude",
 };
 
+export const PROJECT_EDITOR_BUNDLE_IDS = [
+  "com.microsoft.VSCode",
+  "com.todesktop.230313mzl4w4u92",
+  "dev.zed.Zed",
+] as const;
+
+export type ProjectEditorBundleId = (typeof PROJECT_EDITOR_BUNDLE_IDS)[number];
+
 export const ALL_EDITOR_BUNDLE_IDS = Object.keys(EDITOR_DISPLAY_NAMES);
 
-export const MAX_HISTORY_ENTRIES = 20;
+export const MAX_HISTORY_ENTRIES = 200;
 
 export interface EditorState {
   is_active: boolean;

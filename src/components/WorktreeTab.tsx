@@ -12,7 +12,7 @@ interface WorktreeTabProps {
   activeIndex: number;
   statuses: Map<number, ClaudeStatus | undefined>;
   colorId?: string | null;
-  onTabClick: (index: number) => void;
+  onTabClick: (index: number, anchorRect: DOMRect) => void;
   onCloseTab: (index: number) => void;
   onMenuOpen: (rowCount: number) => Promise<void>;
   onMenuClose: () => Promise<void>;
@@ -44,7 +44,8 @@ function WorktreeTab({
 
   const activeEntry = entries.find((entry) => entry.originalIndex === activeIndex);
   const contextEntry = activeEntry ?? entries[0];
-  const isActive = Boolean(activeEntry);
+  const isActive = Boolean(activeEntry && activeEntry.tab.is_open !== false);
+  const hasOpenWindow = entries.some((entry) => entry.tab.is_open !== false);
   const showEditorNames = new Set(entries.map((entry) => entry.tab.bundle_id)).size > 1;
   const hasWaiting = entries.some((entry) => statuses.get(entry.originalIndex) === "waiting");
   const hasGenerating = entries.some((entry) => statuses.get(entry.originalIndex) === "generating");
@@ -57,10 +58,10 @@ function WorktreeTab({
     colorStyle.background = `rgb(${blend(base, r, ratio)}, ${blend(base, g, ratio)}, ${blend(base, b, ratio)})`;
   }
 
-  const closeMenu = useCallback(() => {
+  const closeMenu = useCallback(async () => {
     if (!isOpen) return;
     setIsOpen(false);
-    void onMenuClose();
+    await onMenuClose();
   }, [isOpen, onMenuClose]);
 
   const openMenu = useCallback(() => {
@@ -77,7 +78,7 @@ function WorktreeTab({
 
   const toggleMenu = useCallback(() => {
     if (isOpen) {
-      closeMenu();
+      void closeMenu();
       return;
     }
     openMenu();
@@ -97,7 +98,7 @@ function WorktreeTab({
       const target = event.target as Node;
       if (rootRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
-      closeMenu();
+      void closeMenu();
     };
     document.addEventListener("mousedown", handlePointerDown, true);
     return () => document.removeEventListener("mousedown", handlePointerDown, true);
@@ -110,7 +111,7 @@ function WorktreeTab({
       onKeyDown={(event) => {
         if (event.key === "Escape" && isOpen) {
           event.stopPropagation();
-          closeMenu();
+          void closeMenu();
         }
       }}
       data-tab-index={isActive ? activeIndex : contextEntry.originalIndex}
@@ -121,6 +122,7 @@ function WorktreeTab({
           ...styles.tab,
           ...(isOpen && !isActive ? styles.tabOpen : {}),
           ...(isActive ? styles.tabActive : {}),
+          ...(!hasOpenWindow ? styles.tabClosed : {}),
           ...colorStyle,
         }}
         onMouseDown={(event) => {
@@ -163,24 +165,41 @@ function WorktreeTab({
           {entries.map(({ tab, originalIndex }) => {
             const status = statuses.get(originalIndex);
             const branchName = tab.branch || tab.name || t("app.untitled");
-            const rowActive = originalIndex === activeIndex;
+            const rowActive = tab.is_open !== false && originalIndex === activeIndex;
             return (
-              <div key={runtimeWindowKey(tab)} style={styles.row}>
+              <div
+                key={runtimeWindowKey(tab)}
+                style={{
+                  ...styles.row,
+                  ...(tab.is_open === false ? styles.rowClosed : {}),
+                }}
+              >
                 <button
                   type="button"
                   role="menuitem"
                   aria-current={rowActive ? "page" : undefined}
                   style={{ ...styles.branchButton, ...(rowActive ? styles.branchButtonActive : {}) }}
-                  onClick={() => {
-                    onTabClick(originalIndex);
-                    closeMenu();
+                  onClick={async (event) => {
+                    const anchorRect = event.currentTarget.getBoundingClientRect();
+                    if (tab.is_open === false) {
+                      await closeMenu();
+                    }
+                    onTabClick(originalIndex, anchorRect);
+                    if (tab.is_open !== false) {
+                      void closeMenu();
+                    }
                   }}
                 >
                   <span aria-hidden="true" style={styles.activeMarker}>{rowActive ? "●" : ""}</span>
                   <span style={styles.branchName}>⑂ {branchName}</span>
-                  {showEditorNames && (
+                  {showEditorNames && tab.is_open !== false && (
                     <span style={styles.editorName}>
                       {EDITOR_DISPLAY_NAMES[tab.bundle_id] || tab.editor_name}
+                    </span>
+                  )}
+                  {tab.is_open === false && (
+                    <span style={tab.open_error ? styles.errorLabel : styles.closedLabel}>
+                      {t(tab.open_error ? "tabBar.openFailed" : "tabBar.closedLabel")}
                     </span>
                   )}
                   {status === "waiting" && <span style={styles.badgeWaiting} />}
@@ -191,10 +210,10 @@ function WorktreeTab({
                   style={styles.closeButton}
                   onClick={() => {
                     onCloseTab(originalIndex);
-                    if (entries.length === 2) closeMenu();
+                    if (entries.length === 2) void closeMenu();
                   }}
-                  aria-label={t("worktree.closeBranch", { branch: branchName })}
-                  title={t("tabBar.closeTooltip")}
+                  aria-label={t("tabBar.removeTooltip")}
+                  title={t("tabBar.removeTooltip")}
                 >
                   ×
                 </button>
@@ -241,6 +260,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tabOpen: {
     background: "#333333",
+  },
+  tabClosed: {
+    opacity: 0.55,
   },
   name: {
     minWidth: 0,
@@ -339,6 +361,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: "rgba(255, 255, 255, 0.6)",
     cursor: "pointer",
     fontSize: "14px",
+  },
+  rowClosed: {
+    opacity: 0.55,
+  },
+  closedLabel: {
+    flexShrink: 0,
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: "10px",
+  },
+  errorLabel: {
+    flexShrink: 0,
+    color: "#ff6961",
+    fontSize: "10px",
   },
   badgeWaiting: {
     ...badgeStyle,

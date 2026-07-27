@@ -9,8 +9,10 @@ const blend = (base: number, color: number, ratio: number) =>
 interface TabProps {
   name: string;
   isActive: boolean;
+  isOpen: boolean;
+  hasOpenError: boolean;
   isDragging: boolean;
-  onClick: (index: number) => void;
+  onClick: (index: number, anchorRect: DOMRect) => void;
   onClose: (index: number) => void;
   onDragStart: (index: number) => void;
   onDragEnd: () => void;
@@ -23,7 +25,7 @@ interface TabProps {
   branch?: string;
 }
 
-const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu, branch }: TabProps) {
+const Tab = memo(function Tab({ name, isActive, isOpen, hasOpenError, isDragging, onClick, onClose, onDragStart, onDragEnd, onDragOver, onDrop, index, claudeStatus, colorId, onContextMenu, branch }: TabProps) {
   const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
@@ -52,13 +54,14 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
       style={{
         ...styles.tab,
         ...(isActive ? styles.tabActive : {}),
+        ...(!isOpen ? styles.tabClosed : {}),
         ...(isHovered ? styles.tabHover : {}),
         ...(isDragging ? styles.tabDragging : {}),
         ...colorStyle,
       }}
-      onClick={() => {
+      onClick={(event) => {
         setIsHovered(false);
-        onClick(index);
+        onClick(index, event.currentTarget.getBoundingClientRect());
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onMouseEnter={() => setIsHovered(true)}
@@ -87,9 +90,22 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
         e.preventDefault();
         onDrop(index);
       }}
-      title={shortcutKey ? `${displayName} (${shortcutKey})` : displayName}
+      title={!isOpen
+        ? t("tabBar.closedTooltip", { name: displayName })
+        : shortcutKey
+          ? `${displayName} (${shortcutKey})`
+          : displayName}
       data-tab-index={index}
     >
+      {!isOpen && (
+        <span
+          aria-label={hasOpenError ? t("tabBar.openFailed") : t("tabBar.closedLabel")}
+          title={hasOpenError ? t("tabBar.openFailed") : undefined}
+          style={hasOpenError ? styles.errorIndicator : styles.closedIndicator}
+        >
+          {hasOpenError ? "!" : ""}
+        </span>
+      )}
       <div style={styles.tabTextContent}>
         <span style={styles.tabName}>{displayName}</span>
         {branch && (
@@ -107,7 +123,8 @@ const Tab = memo(function Tab({ name, isActive, isDragging, onClick, onClose, on
           e.stopPropagation();
           onClose(index);
         }}
-        title={t("tabBar.closeTooltip")}
+        aria-label={t("tabBar.removeTooltip")}
+        title={t("tabBar.removeTooltip")}
       >
         ×
       </button>
@@ -134,6 +151,9 @@ const styles: Record<string, React.CSSProperties> = {
   tabActive: {
     background: "#484848",
     borderBottom: "2px solid #007aff",
+  },
+  tabClosed: {
+    opacity: 0.55,
   },
   tabHover: {
     background: "#333333",
@@ -177,6 +197,26 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     transition: "opacity 0.15s, background 0.15s",
+    flexShrink: 0,
+  },
+  closedIndicator: {
+    width: "7px",
+    height: "7px",
+    border: "1px solid rgba(255, 255, 255, 0.65)",
+    borderRadius: "50%",
+    flexShrink: 0,
+  },
+  errorIndicator: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "12px",
+    height: "12px",
+    borderRadius: "50%",
+    background: "#ff3b30",
+    color: "#ffffff",
+    fontSize: "9px",
+    fontWeight: 700,
     flexShrink: 0,
   },
   badgeWaiting: {

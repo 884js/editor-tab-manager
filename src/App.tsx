@@ -45,9 +45,7 @@ function App() {
   });
 
   // 2. History (reads bridge ref lazily)
-  const history = useHistory({
-    refreshWindowsRef: refreshWindowsBridgeRef,
-  });
+  const history = useHistory();
 
   // 3. Editor windows
   const editorWindows = useEditorWindows({
@@ -122,7 +120,12 @@ function App() {
       showAddMenu={history.showAddMenu}
       onAddMenuOpen={lifecycle.handleAddMenuOpen}
       onAddMenuClose={lifecycle.handleAddMenuClose}
-      onHistorySelect={history.handleOpenFromHistory}
+      onEditorPickerOpen={lifecycle.handleEditorPickerOpen}
+      onEditorPickerClose={lifecycle.handleEditorPickerClose}
+      onHistorySelect={(entry, bundleId) =>
+        editorWindows.handleOpenProject(entry.path, bundleId)
+      }
+      onClosedTabOpen={editorWindows.handleOpenSavedTab}
       onHistoryClear={history.handleClearHistory}
       groups={editorWindows.groups}
       groupAssignments={editorWindows.groupAssignments}

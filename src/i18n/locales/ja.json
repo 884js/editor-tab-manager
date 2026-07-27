@@ -1,13 +1,19 @@
 {
   "app": {
     "closeConfirm": "「{{name}}」を閉じますか？",
+    "closeAndRemoveConfirm": "「{{name}}」を閉じてタブから削除しますか？",
+    "removeTabConfirm": "「{{name}}」をタブから削除しますか？",
     "closeConfirmTitle": "確認",
     "notificationBody": "Generation complete ✅",
     "untitled": "Untitled"
   },
   "tabBar": {
     "newEditorTooltip": "新しいエディタウィンドウを開く (Cmd+Shift+T)",
-    "closeTooltip": "閉じる (Cmd+W)"
+    "closeTooltip": "閉じる (Cmd+W)",
+    "removeTooltip": "タブから削除",
+    "closedTooltip": "{{name}}（閉じています。クリックして開く）",
+    "closedLabel": "閉じています",
+    "openFailed": "エディタで開けませんでした"
   },
   "worktree": {
     "openBranches": "{{name}}のブランチを開く",
@@ -73,7 +79,10 @@
     "quit": "Editor Tab Managerを終了"
   },
   "history": {
+    "chooseEditor": "エディタを選択",
+    "cancel": "キャンセル",
     "newWindow": "新規ウィンドウ",
+    "openFailed": "{{editor}}で開けませんでした",
     "recentProjects": "最近のプロジェクト",
     "empty": "履歴はありません",
     "clear": "履歴をクリア",

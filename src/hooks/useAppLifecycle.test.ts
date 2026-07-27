@@ -256,6 +256,22 @@ describe("useAppLifecycle", () => {
       expect(appWindow.setSize).toHaveBeenLastCalledWith(new LogicalSize(1920, 140));
     });
 
+    it("expands the window for the editor picker", async () => {
+      const appWindow = getCurrentWindow();
+      const { result } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+      });
+      vi.mocked(appWindow.setSize).mockClear();
+
+      await act(async () => {
+        await result.current.handleEditorPickerOpen();
+      });
+
+      expect(appWindow.setSize).toHaveBeenLastCalledWith(new LogicalSize(1920, 456));
+    });
+
   });
 
   describe("app-activated event", () => {

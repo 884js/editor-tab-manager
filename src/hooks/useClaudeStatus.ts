@@ -140,11 +140,14 @@ export function useClaudeStatus({
 
         await new Promise((r) => setTimeout(r, 500));
 
-        const win = windowsRef.current.find((w) => projectPathMatchesWindow(projectPath, w));
+        const win = windowsRef.current.find(
+          (w) => w.is_open !== false && projectPathMatchesWindow(projectPath, w),
+        );
         if (win) {
           await invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
-        } else if (windowsRef.current.length > 0) {
-          const first = windowsRef.current[0];
+        } else {
+          const first = windowsRef.current.find((window) => window.is_open !== false);
+          if (!first) return;
           await invoke("focus_editor_window", { bundle_id: first.bundle_id, window_id: first.id });
         }
       });

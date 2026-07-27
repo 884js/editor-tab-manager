@@ -311,4 +311,5 @@ describe("Store functions", () => {
       expect(result).toEqual([]);
     });
   });
+
 });

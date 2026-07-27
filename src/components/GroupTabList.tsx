@@ -15,9 +15,9 @@ interface GroupTabListProps {
   showBranch: boolean;
   anchorLeft: number;
   expandedRepositories: ReadonlySet<string>;
-  onTabClick: (index: number) => void;
+  onTabClick: (index: number, anchorRect: DOMRect) => void;
   onCloseTab: (index: number) => void;
-  onRequestClose: () => void;
+  onRequestClose: () => Promise<void>;
   onTabContextMenu: (index: number, rect: DOMRect) => void;
   onRepositoryContextMenu: (
     repositoryId: string,
@@ -84,7 +84,7 @@ function GroupTabList({
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
       if (menuRef.current?.contains(event.target as Node)) return;
-      onRequestClose();
+      void onRequestClose();
     };
     document.addEventListener("mousedown", handlePointerDown, true);
     return () => document.removeEventListener("mousedown", handlePointerDown, true);
@@ -95,7 +95,7 @@ function GroupTabList({
   }, [onRowCountChange, visibleRowCount]);
 
   const renderTabRow = ({ tab, originalIndex }: TabEntry, nested = false) => {
-    const isActive = originalIndex === activeIndex;
+    const isActive = tab.is_open !== false && originalIndex === activeIndex;
     const status = statuses.get(originalIndex);
     const branchName = tab.branch || tab.name || t("app.untitled");
     const colorId = tabColors
@@ -109,6 +109,7 @@ function GroupTabList({
           ...styles.row,
           ...(nested ? styles.nestedRow : {}),
           ...(isActive ? styles.rowActive : {}),
+          ...(tab.is_open === false ? styles.rowClosed : {}),
         }}
         draggable
         onDragStart={(event) => {
@@ -136,9 +137,15 @@ function GroupTabList({
             ...styles.tabButton,
             ...getColorBorder(colorId),
           }}
-          onClick={() => {
-            onTabClick(originalIndex);
-            onRequestClose();
+          onClick={async (event) => {
+            const anchorRect = event.currentTarget.getBoundingClientRect();
+            if (tab.is_open === false) {
+              await onRequestClose();
+            }
+            onTabClick(originalIndex, anchorRect);
+            if (tab.is_open !== false) {
+              void onRequestClose();
+            }
           }}
           onContextMenu={(event) => {
             event.preventDefault();
@@ -152,9 +159,16 @@ function GroupTabList({
               <span style={styles.branchName}>⑂ {tab.branch}</span>
             )}
           </span>
-          <span style={styles.editorName}>
-            {EDITOR_DISPLAY_NAMES[tab.bundle_id] || tab.editor_name}
-          </span>
+          {tab.is_open !== false && (
+            <span style={styles.editorName}>
+              {EDITOR_DISPLAY_NAMES[tab.bundle_id] || tab.editor_name}
+            </span>
+          )}
+          {tab.is_open === false && (
+            <span style={tab.open_error ? styles.errorLabel : styles.closedLabel}>
+              {t(tab.open_error ? "tabBar.openFailed" : "tabBar.closedLabel")}
+            </span>
+          )}
           {status === "waiting" && <span style={styles.badgeWaiting} />}
           {status === "generating" && <span style={styles.badgeGenerating} className="pulse-animation" />}
         </button>
@@ -162,8 +176,8 @@ function GroupTabList({
           type="button"
           style={styles.closeButton}
           onClick={() => onCloseTab(originalIndex)}
-          aria-label={t("worktree.closeBranch", { branch: branchName })}
-          title={t("tabBar.closeTooltip")}
+          aria-label={t("tabBar.removeTooltip")}
+          title={t("tabBar.removeTooltip")}
         >
           ×
         </button>
@@ -180,7 +194,7 @@ function GroupTabList({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.stopPropagation();
-          onRequestClose();
+          void onRequestClose();
         }
       }}
     >
@@ -188,7 +202,9 @@ function GroupTabList({
         if (item.type === "tab") return renderTabRow(item.entry);
 
         const indices = item.entries.map((entry) => entry.originalIndex);
-        const activeEntry = item.entries.find((entry) => entry.originalIndex === activeIndex);
+        const activeEntry = item.entries.find(
+          (entry) => entry.tab.is_open !== false && entry.originalIndex === activeIndex,
+        );
         const isExpanded = expandedRepositories.has(item.key);
         const isParentActive = Boolean(activeEntry) && !isExpanded;
         const preferredIndex = activeEntry?.originalIndex ?? indices[0];
@@ -294,6 +310,9 @@ const styles: Record<string, React.CSSProperties> = {
   rowActive: {
     background: "rgba(0, 122, 255, 0.18)",
   },
+  rowClosed: {
+    opacity: 0.55,
+  },
   nestedRow: {
     marginTop: "2px",
   },
@@ -347,6 +366,16 @@ const styles: Record<string, React.CSSProperties> = {
   editorName: {
     flexShrink: 0,
     color: "rgba(255, 255, 255, 0.5)",
+    fontSize: "10px",
+  },
+  closedLabel: {
+    flexShrink: 0,
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: "10px",
+  },
+  errorLabel: {
+    flexShrink: 0,
+    color: "#ff6961",
     fontSize: "10px",
   },
   closeButton: {
