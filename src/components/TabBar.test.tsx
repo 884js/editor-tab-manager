@@ -129,7 +129,7 @@ describe("TabBar repository grouping", () => {
     })).toBeInTheDocument();
   });
 
-  it("restores a legacy group assignment left under another editor", () => {
+  it("does not inherit a same-named legacy group assignment from another editor", () => {
     const movedTab = {
       ...standaloneWindow,
       bundle_id: "com.microsoft.VSCode",
@@ -143,10 +143,9 @@ describe("TabBar repository grouping", () => {
       { [`${standaloneWindow.bundle_id}:${standaloneWindow.name}`]: "medii" },
     );
 
-    const group = screen.getByRole("button", { name: "medii" })
-      .closest(".tab-group");
-    expect(within(group as HTMLElement).getByTitle("tabBar.closedTooltip"))
-      .toBeInTheDocument();
+    expect(
+      screen.getByTitle("tabBar.closedTooltip").closest(".tab-group"),
+    ).toBeNull();
   });
 
   it("assigns every repository window from the parent context menu", async () => {

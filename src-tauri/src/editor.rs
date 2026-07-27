@@ -3,6 +3,8 @@ use crate::editor_config::{EditorConfig, EDITORS};
 use crate::editor_model::{EditorSession, NativeEditorWindow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Condvar;
 use std::time::{Duration, Instant};
 
 pub use crate::editor_model::{
@@ -12,6 +14,7 @@ pub use crate::editor_model::{
 type WindowPathCacheKey = (String, u32, String);
 type WorkspacePathOwnerKey = (String, PathBuf);
 const PENDING_PROJECT_OPEN_TTL: Duration = Duration::from_secs(30);
+static NEXT_PENDING_PROJECT_OPEN_ID: AtomicU64 = AtomicU64::new(1);
 
 lazy_static::lazy_static! {
     /// Editor ID + window ID + project name -> full path
@@ -20,12 +23,24 @@ lazy_static::lazy_static! {
     static ref PENDING_PROJECT_OPENS:
         std::sync::Mutex<HashMap<String, Vec<PendingProjectOpen>>> =
         std::sync::Mutex::new(HashMap::new());
+    static ref PENDING_PROJECT_OPEN_CHANGED: Condvar = Condvar::new();
+    static ref PENDING_WINDOW_PATHS:
+        std::sync::Mutex<HashMap<WindowPathCacheKey, PendingWindowPath>> =
+        std::sync::Mutex::new(HashMap::new());
 }
 
 #[derive(Clone)]
 struct PendingProjectOpen {
+    request_id: u64,
     path: PathBuf,
     existing_window_ids: HashSet<u32>,
+    created_at: Instant,
+    is_ready: bool,
+}
+
+#[derive(Clone)]
+struct PendingWindowPath {
+    path: PathBuf,
     created_at: Instant,
 }
 
@@ -164,7 +179,6 @@ fn collect_editor_windows(
         .map(|window| (window.id, window.title.clone(), window.is_frontmost))
         .collect::<Vec<_>>();
     prepare_window_path_resolution(config, &ax_windows, &workspace_state);
-    let pending_resolutions = take_pending_project_open_paths(config, &native_windows);
     let project_window_counts = count_project_windows(config, &ax_windows);
 
     for (window_id, (path, _)) in &session_resolutions {
@@ -173,6 +187,36 @@ fn collect_editor_windows(
             cache_window_path(config.id, *window_id, &name, path);
         }
     }
+
+    let mut standard_resolutions = HashMap::new();
+    for window in native_windows
+        .iter()
+        .filter(|window| !window.title.is_empty() && window.title != "Untitled")
+    {
+        if let Some((path, resolution)) = session_resolutions.get(&window.id) {
+            standard_resolutions.insert(window.id, (path.clone(), *resolution));
+            continue;
+        }
+        let name = extract_project_name(&window.title, config);
+        if let Some(path) = resolve_project_path(
+            &name,
+            config.id,
+            pid,
+            window.id,
+            project_window_counts.get(&name).copied().unwrap_or(1),
+            &workspace_state,
+        ) {
+            standard_resolutions.insert(window.id, (path, WorkspaceResolution::Inferred));
+        }
+    }
+    let resolved_paths = standard_resolutions
+        .iter()
+        .map(|(window_id, (path, _))| (*window_id, path.clone()))
+        .collect::<HashMap<_, _>>();
+    acknowledge_resolved_pending_project_open(config, &resolved_paths);
+    let resolved_window_ids = standard_resolutions.keys().copied().collect::<HashSet<_>>();
+    let pending_resolutions =
+        take_pending_project_open_paths(config, &native_windows, &resolved_window_ids);
 
     let active_id = native_windows
         .iter()
@@ -185,21 +229,11 @@ fn collect_editor_windows(
                 return None;
             }
             let name = extract_project_name(&window.title, config);
-            let session_resolution = session_resolutions.get(&window.id);
-            let resolved_path = session_resolution
+            let standard_resolution = standard_resolutions.get(&window.id);
+            let resolved_path = standard_resolution
                 .map(|(path, _)| path.clone())
-                .or_else(|| {
-                    resolve_project_path(
-                        &name,
-                        config.id,
-                        pid,
-                        window.id,
-                        project_window_counts.get(&name).copied().unwrap_or(1),
-                        &workspace_state,
-                    )
-                })
                 .or_else(|| pending_resolutions.get(&window.id).cloned());
-            let resolution = session_resolution
+            let resolution = standard_resolution
                 .map(|(_, resolution)| *resolution)
                 .or_else(|| resolved_path.as_ref().map(|_| WorkspaceResolution::Inferred))
                 .unwrap_or(WorkspaceResolution::Unresolved);
@@ -256,6 +290,9 @@ pub fn get_all_editor_window_snapshot() -> (Vec<EditorWindow>, Option<u32>) {
 pub fn invalidate_path_cache_for_editor(editor_id: &str) {
     if let Ok(mut cache) = WINDOW_PATH_CACHE.lock() {
         cache.retain(|(cached_editor_id, _, _), _| cached_editor_id != editor_id);
+    }
+    if let Ok(mut pending_paths) = PENDING_WINDOW_PATHS.lock() {
+        pending_paths.retain(|(cached_editor_id, _, _), _| cached_editor_id != editor_id);
     }
 }
 
@@ -491,12 +528,71 @@ fn percent_decode(input: &str) -> String {
 }
 
 fn cache_window_path(editor_id: &str, window_id: u32, project_name: &str, path: &Path) {
+    let key = (editor_id.to_string(), window_id, project_name.to_string());
     if let Ok(mut cache) = WINDOW_PATH_CACHE.lock() {
-        cache.insert(
-            (editor_id.to_string(), window_id, project_name.to_string()),
-            path.to_path_buf(),
+        cache.insert(key.clone(), path.to_path_buf());
+    }
+    if let Ok(mut pending_paths) = PENDING_WINDOW_PATHS.lock() {
+        pending_paths.remove(&key);
+    }
+}
+
+fn cache_pending_window_path(
+    editor_id: &str,
+    window_id: u32,
+    project_name: &str,
+    path: &Path,
+) {
+    let key = (editor_id.to_string(), window_id, project_name.to_string());
+    if let Ok(mut cache) = WINDOW_PATH_CACHE.lock() {
+        cache.insert(key.clone(), path.to_path_buf());
+    }
+    if let Ok(mut pending_paths) = PENDING_WINDOW_PATHS.lock() {
+        pending_paths.insert(
+            key,
+            PendingWindowPath {
+                path: path.to_path_buf(),
+                created_at: Instant::now(),
+            },
         );
     }
+}
+
+fn active_pending_window_paths(
+    config: &EditorConfig,
+    ax_windows: &[(u32, String, bool)],
+) -> HashMap<WindowPathCacheKey, PathBuf> {
+    let now = Instant::now();
+    let mut pending_paths = match PENDING_WINDOW_PATHS.lock() {
+        Ok(paths) => paths,
+        Err(_) => return HashMap::new(),
+    };
+    pending_paths.retain(|(editor_id, window_id, project_name), pending| {
+        if editor_id != config.id {
+            return true;
+        }
+        now.duration_since(pending.created_at) <= PENDING_PROJECT_OPEN_TTL
+            && ax_windows.iter().any(|(id, title, _)| {
+                id == window_id && extract_project_name(title, config) == *project_name
+            })
+    });
+    pending_paths
+        .iter()
+        .filter(|((editor_id, _, _), _)| editor_id == config.id)
+        .map(|(key, pending)| (key.clone(), pending.path.clone()))
+        .collect()
+}
+
+fn pending_window_path(key: &WindowPathCacheKey) -> Option<PathBuf> {
+    let now = Instant::now();
+    let mut pending_paths = PENDING_WINDOW_PATHS.lock().ok()?;
+    let is_expired = pending_paths
+        .get(key)
+        .is_some_and(|pending| now.duration_since(pending.created_at) > PENDING_PROJECT_OPEN_TTL);
+    if is_expired {
+        pending_paths.remove(key);
+    }
+    pending_paths.get(key).map(|pending| pending.path.clone())
 }
 
 fn workspace_path_for_document(candidates: &[PathBuf], document_path: &Path) -> Option<PathBuf> {
@@ -541,6 +637,7 @@ fn prepare_window_path_resolution(
     ax_windows: &[(u32, String, bool)],
     workspace_state: &OpenWorkspaceState,
 ) {
+    let pending_paths = active_pending_window_paths(config, ax_windows);
     let active_window = workspace_state
         .active_path
         .as_ref()
@@ -553,7 +650,11 @@ fn prepare_window_path_resolution(
                 .paths_by_name
                 .get(&project_name)
                 .is_some_and(|paths| paths.contains(active_path));
-            is_candidate.then(|| (*window_id, project_name, active_path.clone()))
+            let key = (config.id.to_string(), *window_id, project_name.clone());
+            let conflicts_with_pending =
+                pending_paths.get(&key).is_some_and(|path| path != active_path);
+            (is_candidate && !conflicts_with_pending)
+                .then(|| (*window_id, project_name, active_path.clone()))
         });
 
     let mut cache = match WINDOW_PATH_CACHE.lock() {
@@ -570,7 +671,12 @@ fn prepare_window_path_resolution(
                 .paths_by_name
                 .get(project_name)
                 .is_some_and(|paths| paths.contains(path));
-        window_exists && path_is_open
+        let path_is_pending = pending_paths.get(&(
+            editor_id.clone(),
+            *window_id,
+            project_name.clone(),
+        )) == Some(path);
+        window_exists && (path_is_open || path_is_pending)
     });
 
     let active_key = active_window.map(|(window_id, project_name, active_path)| {
@@ -584,20 +690,28 @@ fn prepare_window_path_resolution(
     let mut duplicate_keys = Vec::new();
     for (key, path) in cache.iter().filter(|(key, _)| key.0 == config.id) {
         let owner_key = (key.2.clone(), path.clone());
-        let is_active = active_key.as_ref() == Some(key);
-        if let Some((existing_key, existing_is_active)) = path_owners.get(&owner_key) {
-            if is_active && !existing_is_active {
+        let is_preferred =
+            active_key.as_ref() == Some(key) || pending_paths.get(key) == Some(path);
+        if let Some((existing_key, existing_is_preferred)) = path_owners.get(&owner_key) {
+            if is_preferred && !existing_is_preferred {
                 duplicate_keys.push(existing_key.clone());
                 path_owners.insert(owner_key, (key.clone(), true));
             } else {
                 duplicate_keys.push(key.clone());
             }
         } else {
-            path_owners.insert(owner_key, (key.clone(), is_active));
+            path_owners.insert(owner_key, (key.clone(), is_preferred));
         }
     }
     for key in duplicate_keys {
         cache.remove(&key);
+    }
+    drop(cache);
+
+    if let Some(active_key) = active_key {
+        if let Ok(mut pending_paths) = PENDING_WINDOW_PATHS.lock() {
+            pending_paths.remove(&active_key);
+        }
     }
 }
 
@@ -632,9 +746,13 @@ fn resolve_project_path(
         .get(project_name)
         .cloned()
         .unwrap_or_default();
+    let protected_path = pending_window_path(&window_cache_key);
     let mut cache = WINDOW_PATH_CACHE.lock().ok()?;
     if let Some(path) = cache.get(&window_cache_key) {
-        if !workspace_state.is_available || candidates.contains(path) {
+        if protected_path.as_ref() == Some(path)
+            || !workspace_state.is_available
+            || candidates.contains(path)
+        {
             return Some(path.clone());
         }
         cache.remove(&window_cache_key);
@@ -855,15 +973,13 @@ fn find_zed_cli() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
-fn current_editor_window_ids(config: &EditorConfig) -> HashSet<u32> {
+fn current_editor_window_ids(config: &EditorConfig) -> Result<HashSet<u32>, String> {
     let Some(pid) = ax_helper::get_pid_by_bundle_id(config.bundle_id) else {
-        return HashSet::new();
+        return Ok(HashSet::new());
     };
     ax_helper::get_native_windows_ax(pid, config.bundle_id, config.id == "cursor")
-        .unwrap_or_default()
-        .into_iter()
-        .map(|window| window.id)
-        .collect()
+        .map_err(|error| format!("Failed to inspect existing editor windows: {}", error))
+        .map(|windows| windows.into_iter().map(|window| window.id).collect())
 }
 
 fn project_path_matches_name(path: &Path, project_name: &str) -> bool {
@@ -879,6 +995,7 @@ fn match_pending_project_opens(
     config: &EditorConfig,
     pending_opens: &[PendingProjectOpen],
     native_windows: &[NativeEditorWindow],
+    resolved_window_ids: &HashSet<u32>,
 ) -> (HashMap<u32, PathBuf>, HashSet<usize>) {
     let windows = native_windows
         .iter()
@@ -896,10 +1013,14 @@ fn match_pending_project_opens(
 
     for index in pending_indices {
         let pending = &pending_opens[index];
+        if !pending.is_ready {
+            continue;
+        }
         let candidates = windows
             .iter()
             .filter(|(window_id, project_name)| {
                 !pending.existing_window_ids.contains(window_id)
+                    && !resolved_window_ids.contains(window_id)
                     && !assigned_window_ids.contains(window_id)
                     && project_path_matches_name(&pending.path, project_name)
             })
@@ -930,59 +1051,210 @@ fn match_pending_project_opens(
     (matches, consumed_pending_indices)
 }
 
-fn register_pending_project_open(
-    config: &EditorConfig,
-    path: &Path,
-    existing_window_ids: HashSet<u32>,
-) {
-    if let Ok(mut pending_by_editor) = PENDING_PROJECT_OPENS.lock() {
-        pending_by_editor
-            .entry(config.id.to_string())
-            .or_default()
-            .push(PendingProjectOpen {
-                path: path.to_path_buf(),
-                existing_window_ids,
-                created_at: Instant::now(),
+fn prune_expired_pending_project_opens(
+    pending_by_editor: &mut HashMap<String, Vec<PendingProjectOpen>>,
+    editor_id: &str,
+) -> bool {
+    let now = Instant::now();
+    let mut removed = false;
+    let is_empty = if let Some(pending_opens) = pending_by_editor.get_mut(editor_id) {
+        let previous_len = pending_opens.len();
+        pending_opens.retain(|pending| {
+            now.duration_since(pending.created_at) <= PENDING_PROJECT_OPEN_TTL
+        });
+        removed = pending_opens.len() != previous_len;
+        pending_opens.is_empty()
+    } else {
+        false
+    };
+    if is_empty {
+        pending_by_editor.remove(editor_id);
+    }
+    removed
+}
+
+fn reserve_pending_project_open(editor_id: &str, path: &Path) -> Result<u64, String> {
+    let mut pending_by_editor = PENDING_PROJECT_OPENS
+        .lock()
+        .map_err(|_| "Project open coordinator is unavailable".to_string())?;
+
+    loop {
+        if prune_expired_pending_project_opens(&mut pending_by_editor, editor_id) {
+            PENDING_PROJECT_OPEN_CHANGED.notify_all();
+        }
+        if !pending_by_editor.contains_key(editor_id) {
+            let request_id = NEXT_PENDING_PROJECT_OPEN_ID.fetch_add(1, Ordering::Relaxed);
+            pending_by_editor.insert(
+                editor_id.to_string(),
+                vec![PendingProjectOpen {
+                    request_id,
+                    path: path.to_path_buf(),
+                    existing_window_ids: HashSet::new(),
+                    created_at: Instant::now(),
+                    is_ready: false,
+                }],
+            );
+            return Ok(request_id);
+        }
+
+        let wait_duration = pending_by_editor
+            .get(editor_id)
+            .and_then(|pending_opens| {
+                pending_opens
+                    .iter()
+                    .map(|pending| {
+                        PENDING_PROJECT_OPEN_TTL
+                            .saturating_sub(pending.created_at.elapsed())
+                    })
+                    .min()
             });
+        pending_by_editor = if let Some(wait_duration) = wait_duration {
+            PENDING_PROJECT_OPEN_CHANGED
+                .wait_timeout(pending_by_editor, wait_duration)
+                .map_err(|_| "Project open coordinator is unavailable".to_string())?
+                .0
+        } else {
+            PENDING_PROJECT_OPEN_CHANGED
+                .wait(pending_by_editor)
+                .map_err(|_| "Project open coordinator is unavailable".to_string())?
+        };
+    }
+}
+
+fn mark_pending_project_open_ready(
+    editor_id: &str,
+    request_id: u64,
+    existing_window_ids: HashSet<u32>,
+) -> Result<(), String> {
+    let mut pending_by_editor = PENDING_PROJECT_OPENS
+        .lock()
+        .map_err(|_| "Project open coordinator is unavailable".to_string())?;
+    let pending = pending_by_editor
+        .get_mut(editor_id)
+        .and_then(|pending_opens| {
+            pending_opens
+                .iter_mut()
+                .find(|pending| pending.request_id == request_id)
+        })
+        .ok_or_else(|| "Project open request was cancelled".to_string())?;
+    pending.existing_window_ids = existing_window_ids;
+    pending.created_at = Instant::now();
+    pending.is_ready = true;
+    PENDING_PROJECT_OPEN_CHANGED.notify_all();
+    Ok(())
+}
+
+fn cancel_pending_project_open(editor_id: &str, request_id: u64) {
+    if let Ok(mut pending_by_editor) = PENDING_PROJECT_OPENS.lock() {
+        let is_empty = if let Some(pending_opens) = pending_by_editor.get_mut(editor_id) {
+            pending_opens.retain(|pending| pending.request_id != request_id);
+            pending_opens.is_empty()
+        } else {
+            false
+        };
+        if is_empty {
+            pending_by_editor.remove(editor_id);
+        }
+        PENDING_PROJECT_OPEN_CHANGED.notify_all();
+    }
+}
+
+fn snapshot_pending_project_opens(editor_id: &str) -> Vec<PendingProjectOpen> {
+    let mut pending_by_editor = match PENDING_PROJECT_OPENS.lock() {
+        Ok(pending) => pending,
+        Err(_) => return Vec::new(),
+    };
+    if prune_expired_pending_project_opens(&mut pending_by_editor, editor_id) {
+        PENDING_PROJECT_OPEN_CHANGED.notify_all();
+    }
+    pending_by_editor
+        .get(editor_id)
+        .map(|pending_opens| {
+            pending_opens
+                .iter()
+                .filter(|pending| pending.is_ready)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn consume_pending_project_opens(editor_id: &str, request_ids: &HashSet<u64>) -> bool {
+    let mut pending_by_editor = match PENDING_PROJECT_OPENS.lock() {
+        Ok(pending) => pending,
+        Err(_) => return false,
+    };
+    let mut consumed = 0;
+    let is_empty = if let Some(pending_opens) = pending_by_editor.get_mut(editor_id) {
+        let previous_len = pending_opens.len();
+        pending_opens.retain(|pending| !request_ids.contains(&pending.request_id));
+        consumed = previous_len - pending_opens.len();
+        pending_opens.is_empty()
+    } else {
+        false
+    };
+    if is_empty {
+        pending_by_editor.remove(editor_id);
+    }
+    if consumed > 0 {
+        PENDING_PROJECT_OPEN_CHANGED.notify_all();
+    }
+    consumed == request_ids.len()
+}
+
+fn paths_refer_to_same_project(first: &Path, second: &Path) -> bool {
+    first == second
+        || std::fs::canonicalize(first)
+            .ok()
+            .zip(std::fs::canonicalize(second).ok())
+            .is_some_and(|(first, second)| first == second)
+}
+
+fn acknowledge_resolved_pending_project_open(
+    config: &EditorConfig,
+    resolved_paths: &HashMap<u32, PathBuf>,
+) {
+    let pending_opens = snapshot_pending_project_opens(config.id);
+    let request_ids = pending_opens
+        .iter()
+        .filter(|pending| {
+            resolved_paths
+                .values()
+                .any(|path| paths_refer_to_same_project(&pending.path, path))
+        })
+        .map(|pending| pending.request_id)
+        .collect::<HashSet<_>>();
+    if !request_ids.is_empty() {
+        consume_pending_project_opens(config.id, &request_ids);
     }
 }
 
 fn take_pending_project_open_paths(
     config: &EditorConfig,
     native_windows: &[NativeEditorWindow],
+    resolved_window_ids: &HashSet<u32>,
 ) -> HashMap<u32, PathBuf> {
-    let pending_opens = match PENDING_PROJECT_OPENS.lock() {
-        Ok(mut pending_by_editor) => pending_by_editor.remove(config.id).unwrap_or_default(),
-        Err(_) => return HashMap::new(),
-    };
-    let now = Instant::now();
-    let pending_opens = pending_opens
-        .into_iter()
-        .filter(|pending| now.duration_since(pending.created_at) <= PENDING_PROJECT_OPEN_TTL)
-        .collect::<Vec<_>>();
-    let (matches, consumed_indices) =
-        match_pending_project_opens(config, &pending_opens, native_windows);
-
-    let remaining = pending_opens
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, pending)| {
-            (!consumed_indices.contains(&index)).then_some(pending)
-        })
-        .collect::<Vec<_>>();
-    if !remaining.is_empty() {
-        if let Ok(mut pending_by_editor) = PENDING_PROJECT_OPENS.lock() {
-            pending_by_editor
-                .entry(config.id.to_string())
-                .or_default()
-                .extend(remaining);
-        }
+    let pending_opens = snapshot_pending_project_opens(config.id);
+    let (matches, consumed_indices) = match_pending_project_opens(
+        config,
+        &pending_opens,
+        native_windows,
+        resolved_window_ids,
+    );
+    let request_ids = consumed_indices
+        .iter()
+        .map(|index| pending_opens[*index].request_id)
+        .collect::<HashSet<_>>();
+    if request_ids.is_empty()
+        || !consume_pending_project_opens(config.id, &request_ids)
+    {
+        return HashMap::new();
     }
 
     for (window_id, path) in &matches {
         if let Some(window) = native_windows.iter().find(|window| window.id == *window_id) {
             let project_name = extract_project_name(&window.title, config);
-            cache_window_path(config.id, *window_id, &project_name, path);
+            cache_pending_window_path(config.id, *window_id, &project_name, path);
         }
     }
     matches
@@ -1015,15 +1287,36 @@ pub fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String>
         return Err(format!("Project path does not exist: {}", path));
     }
 
-    let existing_window_ids = current_editor_window_ids(config);
+    let request_id = reserve_pending_project_open(config.id, Path::new(path))?;
+    let existing_window_ids = current_editor_window_ids(config).ok();
     let zed_cli = (config.id == "zed").then(find_zed_cli).flatten();
-    let status = build_project_open_command(config, path, zed_cli.as_deref())?
-        .status()
-        .map_err(|e| format!("Failed to open project: {}", e))?;
+    let status = match build_project_open_command(config, path, zed_cli.as_deref())
+        .and_then(|mut command| {
+            command
+                .status()
+                .map_err(|e| format!("Failed to open project: {}", e))
+        }) {
+        Ok(status) => status,
+        Err(error) => {
+            cancel_pending_project_open(config.id, request_id);
+            return Err(error);
+        }
+    };
     if status.success() {
-        register_pending_project_open(config, Path::new(path), existing_window_ids);
+        if let Some(existing_window_ids) = existing_window_ids {
+            if let Err(error) =
+                mark_pending_project_open_ready(config.id, request_id, existing_window_ids)
+            {
+                cancel_pending_project_open(config.id, request_id);
+                return Err(error);
+            }
+        } else {
+            cancel_pending_project_open(config.id, request_id);
+        }
+        crate::window_registry::request_refresh("project-open");
         Ok(())
     } else {
+        cancel_pending_project_open(config.id, request_id);
         Err(format!("Failed to open project in {}", config.display_name))
     }
 }
@@ -1051,9 +1344,11 @@ mod tests {
 
     fn pending_open(path: &str, existing_window_ids: &[u32]) -> PendingProjectOpen {
         PendingProjectOpen {
+            request_id: 0,
             path: PathBuf::from(path),
             existing_window_ids: existing_window_ids.iter().copied().collect(),
             created_at: Instant::now(),
+            is_ready: true,
         }
     }
 
@@ -1110,8 +1405,12 @@ mod tests {
             let pending = vec![pending_open("/projects/api", &[100])];
             let windows = vec![native_window(100, title), native_window(200, title)];
 
-            let (matches, consumed) =
-                match_pending_project_opens(config, &pending, &windows);
+            let (matches, consumed) = match_pending_project_opens(
+                config,
+                &pending,
+                &windows,
+                &HashSet::new(),
+            );
 
             assert_eq!(matches[&200], PathBuf::from("/projects/api"));
             assert_eq!(consumed, HashSet::from([0]));
@@ -1132,8 +1431,12 @@ mod tests {
             native_window(300, "project"),
         ];
 
-        let (matches, consumed) =
-            match_pending_project_opens(config, &pending, &windows);
+        let (matches, consumed) = match_pending_project_opens(
+            config,
+            &pending,
+            &windows,
+            &HashSet::new(),
+        );
 
         assert_eq!(matches[&200], PathBuf::from("/worktrees/one/project"));
         assert_eq!(matches[&300], PathBuf::from("/worktrees/two/project"));
@@ -1153,11 +1456,160 @@ mod tests {
             native_window(200, "project"),
         ];
 
-        let (matches, consumed) =
-            match_pending_project_opens(config, &pending, &windows);
+        let (matches, consumed) = match_pending_project_opens(
+            config,
+            &pending,
+            &windows,
+            &HashSet::new(),
+        );
 
         assert!(matches.is_empty());
         assert!(consumed.is_empty());
+    }
+
+    #[test]
+    fn pending_open_does_not_consume_an_already_resolved_window() {
+        let config =
+            crate::editor_config::get_editor_by_bundle_id("com.microsoft.VSCode").unwrap();
+        let pending = vec![pending_open("/projects/api", &[100])];
+        let windows = vec![
+            native_window(100, "api — Visual Studio Code"),
+            native_window(200, "api — Visual Studio Code"),
+        ];
+
+        let (matches, consumed) = match_pending_project_opens(
+            config,
+            &pending,
+            &windows,
+            &HashSet::from([200]),
+        );
+
+        assert!(matches.is_empty());
+        assert!(consumed.is_empty());
+    }
+
+    #[test]
+    fn resolved_existing_target_acknowledges_pending_open() {
+        let config = EditorConfig {
+            id: "pending-acknowledgement-test",
+            display_name: "Sample Editor",
+            bundle_id: "com.example.pending-acknowledgement",
+            app_name: "Sample Editor",
+        };
+        let path = PathBuf::from("/projects/api");
+        let request_id = reserve_pending_project_open(config.id, &path).unwrap();
+        mark_pending_project_open_ready(
+            config.id,
+            request_id,
+            HashSet::from([100]),
+        )
+        .unwrap();
+
+        acknowledge_resolved_pending_project_open(
+            &config,
+            &HashMap::from([(100, path.clone())]),
+        );
+        assert!(snapshot_pending_project_opens(config.id).is_empty());
+    }
+
+    #[test]
+    fn project_open_reservations_are_serialized_per_editor() {
+        let config = EditorConfig {
+            id: "pending-serialization-test",
+            display_name: "Sample Editor",
+            bundle_id: "com.example.pending-serialization",
+            app_name: "Sample Editor",
+        };
+        let first = reserve_pending_project_open(
+            config.id,
+            Path::new("/worktrees/one/project"),
+        )
+        .unwrap();
+        mark_pending_project_open_ready(config.id, first, HashSet::from([100])).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let second = reserve_pending_project_open(
+                "pending-serialization-test",
+                Path::new("/worktrees/two/project"),
+            )
+            .unwrap();
+            tx.send(second).unwrap();
+        });
+
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+
+        let matches = take_pending_project_open_paths(
+            &config,
+            &[native_window(100, "project"), native_window(200, "project")],
+            &HashSet::new(),
+        );
+        assert_eq!(
+            matches.get(&200),
+            Some(&PathBuf::from("/worktrees/one/project"))
+        );
+        let second = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        cancel_pending_project_open(config.id, second);
+        waiter.join().unwrap();
+        invalidate_path_cache_for_editor(config.id);
+    }
+
+    #[test]
+    fn launching_reservation_expires_instead_of_blocking_forever() {
+        let editor_id = "pending-launch-timeout-test";
+        {
+            let mut pending_by_editor = PENDING_PROJECT_OPENS.lock().unwrap();
+            pending_by_editor.insert(
+                editor_id.to_string(),
+                vec![PendingProjectOpen {
+                    request_id: 999,
+                    path: PathBuf::from("/worktrees/old/project"),
+                    existing_window_ids: HashSet::new(),
+                    created_at: Instant::now()
+                        .checked_sub(PENDING_PROJECT_OPEN_TTL + Duration::from_secs(1))
+                        .unwrap(),
+                    is_ready: false,
+                }],
+            );
+        }
+
+        let request_id =
+            reserve_pending_project_open(editor_id, Path::new("/worktrees/new/project")).unwrap();
+
+        assert_ne!(request_id, 999);
+        cancel_pending_project_open(editor_id, request_id);
+    }
+
+    #[test]
+    fn pending_window_path_survives_stale_workspace_state() {
+        let config = EditorConfig {
+            id: "pending-cache-test",
+            display_name: "Sample Editor",
+            bundle_id: "com.example.pending-cache",
+            app_name: "Sample Editor",
+        };
+        let path = PathBuf::from("/worktrees/one/project");
+        let stale_active_path = PathBuf::from("/worktrees/old/project");
+        cache_pending_window_path(config.id, 200, "project", &path);
+        let windows = vec![(200, "project — Sample Editor".to_string(), true)];
+        let workspace_state = OpenWorkspaceState {
+            is_available: true,
+            active_path: Some(stale_active_path.clone()),
+            all_paths: vec![stale_active_path.clone()],
+            paths_by_name: HashMap::from([(
+                "project".to_string(),
+                vec![stale_active_path],
+            )]),
+        };
+
+        prepare_window_path_resolution(&config, &windows, &workspace_state);
+
+        let cache = WINDOW_PATH_CACHE.lock().unwrap();
+        assert_eq!(
+            cache.get(&(config.id.to_string(), 200, "project".to_string())),
+            Some(&path)
+        );
+        drop(cache);
+        invalidate_path_cache_for_editor(config.id);
     }
 
     fn editor_session(id: u32, title: &str, path: Option<&str>) -> EditorSession {

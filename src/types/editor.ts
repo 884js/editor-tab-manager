@@ -19,6 +19,7 @@ export interface EditorWindow {
 }
 
 export interface SavedTab {
+  runtime_id?: string;
   name: string;
   path: string;
   branch?: string;

@@ -6,7 +6,6 @@ import GroupTabList from "./GroupTabList";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
 import EditorPicker from "./EditorPicker";
-import { PROJECT_EDITOR_BUNDLE_IDS } from "../types/editor";
 import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, ProjectEditorBundleId, TabColorMap, TabLayout } from "../types/editor";
 import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, runtimeWindowKey, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
@@ -98,21 +97,12 @@ const getListRowCount = (
 const getTabGroupId = (
   assignments: GroupAssignment,
   tab: EditorWindow,
-): string | null | undefined => {
-  const directGroupId = getWindowScopedValue(
+): string | null | undefined =>
+  getWindowScopedValue(
     assignments,
     tab,
     legacyWindowKey(tab),
   );
-  if (directGroupId !== undefined) return directGroupId;
-
-  const legacyGroupIds = new Set(
-    PROJECT_EDITOR_BUNDLE_IDS
-      .map((bundleId) => assignments[`${bundleId}:${tab.name}`])
-      .filter((groupId): groupId is string => Boolean(groupId)),
-  );
-  return legacyGroupIds.size === 1 ? [...legacyGroupIds][0] : undefined;
-};
 
 function TabBar(props: TabBarProps) {
   const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onEditorPickerOpen, onEditorPickerClose, onHistorySelect, onClosedTabOpen, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;

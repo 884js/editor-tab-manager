@@ -116,6 +116,115 @@ function normalizeSnapshot(payload: WindowsSnapshot | EditorWindow[]): WindowsSn
   return payload;
 }
 
+function isAppliedStructuredSnapshot(
+  payload: WindowsSnapshot | EditorWindow[],
+  lastRevision: number,
+): boolean {
+  return !Array.isArray(payload) && payload.revision <= lastRevision;
+}
+
+function isLegacyNameOrderKey(key: string): boolean {
+  return ALL_EDITOR_BUNDLE_IDS.some((bundleId) => {
+    const prefix = `${bundleId}:`;
+    if (!key.startsWith(prefix)) return false;
+    const identity = key.slice(prefix.length);
+    return Boolean(identity) &&
+      !identity.startsWith("/") &&
+      !identity.startsWith("runtime:");
+  });
+}
+
+function mergeOrderWithUnresolvedLegacyKeys(
+  currentOrder: string[],
+  tabs: EditorWindow[],
+): string[] {
+  const nextKeys = [...new Set(tabs.map(windowKey))];
+  const nextKeySet = new Set(nextKeys);
+  const pathKeysByLegacyKey = new Map<string, Set<string>>();
+  for (const tab of tabs) {
+    if (!tab.path) continue;
+    const key = legacyWindowKey(tab);
+    const pathKeys = pathKeysByLegacyKey.get(key) ?? new Set<string>();
+    pathKeys.add(windowKey(tab));
+    pathKeysByLegacyKey.set(key, pathKeys);
+  }
+
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  const append = (key: string) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(key);
+  };
+
+  for (const key of currentOrder) {
+    if (nextKeySet.has(key)) {
+      append(key);
+      continue;
+    }
+
+    const replacements = pathKeysByLegacyKey.get(key);
+    if (replacements?.size === 1) {
+      append([...replacements][0]);
+      continue;
+    }
+
+    if (isLegacyNameOrderKey(key)) {
+      append(key);
+    }
+  }
+
+  for (const key of nextKeys) {
+    append(key);
+  }
+  return merged;
+}
+
+function mergeReorderedTabsWithUnresolvedLegacyKeys(
+  currentOrder: string[],
+  tabs: EditorWindow[],
+): string[] {
+  const reorderedKeys = [...new Set(tabs.map(windowKey))];
+  const reorderedKeySet = new Set(reorderedKeys);
+  const pathKeysByLegacyKey = new Map<string, Set<string>>();
+  for (const tab of tabs) {
+    if (!tab.path) continue;
+    const key = legacyWindowKey(tab);
+    const pathKeys = pathKeysByLegacyKey.get(key) ?? new Set<string>();
+    pathKeys.add(windowKey(tab));
+    pathKeysByLegacyKey.set(key, pathKeys);
+  }
+  const unresolvedLegacyKeys = new Set(
+    currentOrder.filter(
+      (key) =>
+        isLegacyNameOrderKey(key) &&
+        pathKeysByLegacyKey.get(key)?.size !== 1,
+    ),
+  );
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  let reorderedIndex = 0;
+  const append = (key: string) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(key);
+  };
+
+  for (const key of currentOrder) {
+    if (unresolvedLegacyKeys.has(key)) {
+      append(key);
+    } else if (reorderedKeySet.has(key) && reorderedIndex < reorderedKeys.length) {
+      append(reorderedKeys[reorderedIndex]);
+      reorderedIndex += 1;
+    }
+  }
+  while (reorderedIndex < reorderedKeys.length) {
+    append(reorderedKeys[reorderedIndex]);
+    reorderedIndex += 1;
+  }
+  return merged;
+}
+
 export function useEditorWindows({
   dismissWaitingForWindow,
   syncWaitingTimer,
@@ -168,11 +277,22 @@ export function useEditorWindows({
           loadGroupColors(),
         ]);
         const migratedSavedTabs = migrateLegacySavedTabs(savedTabs, order, history);
+        tabOrderRef.current = order;
+        savedTabsRef.current = migratedSavedTabs;
+        const restoredTabs = sortWindowsByOrder(
+          reconcilePersistentTabs(migratedSavedTabs, []).tabs,
+          order,
+        );
+        windowsRef.current = restoredTabs;
+        setWindows(restoredTabs);
+        setTabColors(colors);
+        setGroups(grps);
+        setGroupAssignments(assigns);
+        setCollapsedGroups(new Set(collapsed));
+        setGroupColors(grpColors);
+
         const metadataPaths = [...new Set(
           migratedSavedTabs
-            .filter((tab) =>
-              !tab.branch || !tab.repository_id || !tab.repository_name
-            )
             .map((tab) => normalizeProjectPath(tab.path))
             .filter(Boolean),
         )];
@@ -187,16 +307,16 @@ export function useEditorWindows({
             console.error("Failed to load project metadata:", error);
           }
         }
-        tabOrderRef.current = order;
         savedTabsRef.current = initialSavedTabs;
+        const tabsWithMetadata = sortWindowsByOrder(
+          reconcilePersistentTabs(initialSavedTabs, []).tabs,
+          order,
+        );
+        windowsRef.current = tabsWithMetadata;
+        setWindows(tabsWithMetadata);
         if (savedTabsDiffer(initialSavedTabs, savedTabs)) {
           void saveSavedTabs(initialSavedTabs);
         }
-        setTabColors(colors);
-        setGroups(grps);
-        setGroupAssignments(assigns);
-        setCollapsedGroups(new Set(collapsed));
-        setGroupColors(grpColors);
         orderLoadedRef.current = true;
       })();
     }
@@ -237,7 +357,10 @@ export function useEditorWindows({
     }
 
     const sorted = sortWindowsByOrder(reconciled.tabs, tabOrderRef.current);
-    const newOrder = [...new Set(sorted.map((window) => windowKey(window)))];
+    const newOrder = mergeOrderWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      sorted,
+    );
     if (stringListsDiffer(newOrder, tabOrderRef.current)) {
       tabOrderRef.current = newOrder;
       void saveTabOrder(newOrder);
@@ -276,10 +399,12 @@ export function useEditorWindows({
   const refreshWindows = useCallback(async () => {
     try {
       await ensureStateLoaded();
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
       void invoke("request_windows_refresh");
+      if (isAppliedStructuredSnapshot(payload, lastSnapshotRevisionRef.current)) {
+        return;
+      }
       lastSnapshotRevisionRef.current = Math.max(
         lastSnapshotRevisionRef.current,
         snapshot.revision,
@@ -297,9 +422,14 @@ export function useEditorWindows({
     }
 
     try {
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
+      if (
+        !Array.isArray(payload) &&
+        payload.revision < lastSnapshotRevisionRef.current
+      ) {
+        return;
+      }
 
       if (snapshot.active_id !== null && snapshot.windows.length > 0) {
         const frontmost = snapshot.windows.find((window) => window.id === snapshot.active_id);
@@ -547,7 +677,10 @@ export function useEditorWindows({
     const [moved] = newWindows.splice(fromIndex, 1);
     newWindows.splice(toIndex, 0, moved);
 
-    const newOrder = newWindows.map((w) => windowKey(w));
+    const newOrder = mergeReorderedTabsWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      newWindows,
+    );
     tabOrderRef.current = newOrder;
     saveTabOrder(newOrder);
 
@@ -569,7 +702,10 @@ export function useEditorWindows({
     const currentWindows = windowsRef.current;
     const newWindows = visualOrder.map((i) => currentWindows[i]);
 
-    const newOrder = newWindows.map((w) => windowKey(w));
+    const newOrder = mergeReorderedTabsWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      newWindows,
+    );
     tabOrderRef.current = newOrder;
     saveTabOrder(newOrder);
 
@@ -705,10 +841,12 @@ export function useEditorWindows({
   const fetchWindows = useCallback(async (): Promise<number> => {
     try {
       await ensureStateLoaded();
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
       void invoke("request_windows_refresh");
+      if (isAppliedStructuredSnapshot(payload, lastSnapshotRevisionRef.current)) {
+        return windowsRef.current.length;
+      }
       const result = snapshot.windows;
       lastSnapshotRevisionRef.current = Math.max(
         lastSnapshotRevisionRef.current,

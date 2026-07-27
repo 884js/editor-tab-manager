@@ -18,6 +18,7 @@ export function savedTabKey(tab: SavedTab): string {
 
 function toSavedTab(window: EditorWindow): SavedTab {
   return {
+    runtime_id: window.runtime_id,
     name: window.name,
     path: normalizeProjectPath(window.path),
     branch: window.branch,
@@ -33,8 +34,8 @@ function toClosedWindow(tab: SavedTab): EditorWindow {
   const key = savedTabKey(tab);
   return {
     id: 0,
-    runtime_id: `saved:${key}`,
     ...tab,
+    runtime_id: tab.runtime_id ?? `saved:${key}`,
     path: normalizeProjectPath(tab.path),
     is_open: false,
   };
@@ -67,20 +68,12 @@ export function reconcilePersistentTabs(
     savedByKey.set(key, toSavedTab(window));
   }
 
-  const unmatchedUnresolvedWindows: EditorWindow[] = [];
-  for (const openWindow of unresolvedWindows) {
-    const candidates = [...savedByKey.entries()].filter(
-      ([key, savedTab]) =>
-        !liveByKey.has(key) &&
-        savedTab.bundle_id === openWindow.bundle_id &&
-        savedTab.name === openWindow.name,
-    );
-    if (candidates.length !== 1) {
-      unmatchedUnresolvedWindows.push(openWindow);
-      continue;
-    }
-
-    const [key, savedTab] = candidates[0];
+  const unmatchedWindowIndices = new Set(unresolvedWindows.map((_, index) => index));
+  const availableSavedTabs = () => [...savedByKey.entries()].filter(
+    ([key]) => !liveByKey.has(key),
+  );
+  const matchWindow = (index: number, [key, savedTab]: [string, SavedTab]) => {
+    const openWindow = unresolvedWindows[index];
     const matchedWindow: EditorWindow = {
       ...savedTab,
       ...openWindow,
@@ -93,8 +86,52 @@ export function reconcilePersistentTabs(
     };
     liveByKey.set(key, matchedWindow);
     savedByKey.set(key, toSavedTab(matchedWindow));
+    unmatchedWindowIndices.delete(index);
+  };
+
+  for (const index of [...unmatchedWindowIndices]) {
+    const openWindow = unresolvedWindows[index];
+    if (!openWindow.runtime_id) continue;
+
+    const matchingLiveWindows = [...unmatchedWindowIndices].filter((candidateIndex) => {
+      const candidate = unresolvedWindows[candidateIndex];
+      return candidate.bundle_id === openWindow.bundle_id &&
+        candidate.runtime_id === openWindow.runtime_id;
+    });
+    const candidates = availableSavedTabs().filter(
+      ([, savedTab]) =>
+        savedTab.bundle_id === openWindow.bundle_id &&
+        savedTab.runtime_id === openWindow.runtime_id,
+    );
+    if (matchingLiveWindows.length === 1 && candidates.length === 1) {
+      matchWindow(index, candidates[0]);
+    }
   }
 
+  for (const index of [...unmatchedWindowIndices]) {
+    const openWindow = unresolvedWindows[index];
+    const matchingLiveWindows = unresolvedWindows.filter((candidate) => {
+      return candidate.bundle_id === openWindow.bundle_id &&
+        candidate.name === openWindow.name;
+    });
+    const matchingSavedTabs = [...savedByKey.entries()].filter(
+      ([, savedTab]) =>
+        savedTab.bundle_id === openWindow.bundle_id &&
+        savedTab.name === openWindow.name,
+    );
+    const candidates = matchingSavedTabs.filter(([key]) => !liveByKey.has(key));
+    if (
+      matchingLiveWindows.length === 1 &&
+      matchingSavedTabs.length === 1 &&
+      candidates.length === 1
+    ) {
+      matchWindow(index, candidates[0]);
+    }
+  }
+
+  const unmatchedUnresolvedWindows = unresolvedWindows.filter(
+    (_, index) => unmatchedWindowIndices.has(index),
+  );
   const nextSavedTabs = [...savedByKey.values()];
   const tabs = nextSavedTabs.map((tab) =>
     liveByKey.get(savedTabKey(tab)) ?? toClosedWindow(tab)
@@ -134,6 +171,7 @@ export function savedTabsDiffer(a: SavedTab[], b: SavedTab[]): boolean {
   return a.some((tab, index) => {
     const other = b[index];
     return !other ||
+      tab.runtime_id !== other.runtime_id ||
       tab.name !== other.name ||
       tab.path !== other.path ||
       tab.branch !== other.branch ||
@@ -157,9 +195,9 @@ export function mergeProjectMetadata(
     if (!item) return tab;
     return {
       ...tab,
-      branch: tab.branch ?? item.branch ?? undefined,
-      repository_id: tab.repository_id ?? item.repository_id ?? undefined,
-      repository_name: tab.repository_name ?? item.repository_name ?? undefined,
+      branch: item.branch ?? undefined,
+      repository_id: item.repository_id ?? undefined,
+      repository_name: item.repository_name ?? undefined,
     };
   });
 }
@@ -169,29 +207,64 @@ export function migrateLegacySavedTabs(
   tabOrder: string[],
   history: HistoryEntry[],
 ): SavedTab[] {
-  if (savedTabs.length > 0 || tabOrder.length === 0) return savedTabs;
+  if (tabOrder.length === 0) return savedTabs;
 
   const historyByKey = new Map(
     history.flatMap((entry) => entry.bundleId
       ? [[`${entry.bundleId}:${normalizeProjectPath(entry.path)}`, entry] as const]
       : []),
   );
-  const migrated: SavedTab[] = [];
+  const historyByLegacyName = new Map<string, Map<string, HistoryEntry>>();
+  for (const entry of history) {
+    if (!entry.bundleId || !entry.path) continue;
+    const key = `${entry.bundleId}:${entry.name}`;
+    const entriesByPath = historyByLegacyName.get(key) ??
+      new Map<string, HistoryEntry>();
+    entriesByPath.set(normalizeProjectPath(entry.path), entry);
+    historyByLegacyName.set(key, entriesByPath);
+  }
+  const migrated = [...savedTabs];
+  const migratedKeys = new Set(savedTabs.map(savedTabKey));
+  let changed = false;
+  const addMigratedTab = (tab: SavedTab) => {
+    const key = savedTabKey(tab);
+    if (migratedKeys.has(key)) return;
+    migratedKeys.add(key);
+    migrated.push(tab);
+    changed = true;
+  };
 
   for (const key of tabOrder) {
     const pathSeparatorIndex = key.indexOf(":/");
-    if (pathSeparatorIndex < 0) continue;
+    if (pathSeparatorIndex >= 0) {
+      const bundleId = key.slice(0, pathSeparatorIndex);
+      const path = normalizeProjectPath(key.slice(pathSeparatorIndex + 1));
+      const historyEntry = historyByKey.get(`${bundleId}:${path}`);
+      addMigratedTab({
+        name: historyEntry?.name || path.split("/").pop() || path,
+        path,
+        bundle_id: bundleId,
+        editor_name: historyEntry?.editorName || EDITOR_DISPLAY_NAMES[bundleId] || bundleId,
+      });
+      continue;
+    }
 
-    const bundleId = key.slice(0, pathSeparatorIndex);
-    const path = normalizeProjectPath(key.slice(pathSeparatorIndex + 1));
-    const historyEntry = historyByKey.get(`${bundleId}:${path}`);
-    migrated.push({
-      name: historyEntry?.name || path.split("/").pop() || path,
+    const separatorIndex = key.indexOf(":");
+    if (separatorIndex < 0) continue;
+    const bundleId = key.slice(0, separatorIndex);
+    const name = key.slice(separatorIndex + 1);
+    if (!name || name.startsWith("runtime:")) continue;
+
+    const historyEntries = historyByLegacyName.get(`${bundleId}:${name}`);
+    if (!historyEntries || historyEntries.size !== 1) continue;
+    const [path, historyEntry] = [...historyEntries.entries()][0];
+    addMigratedTab({
+      name: historyEntry.name,
       path,
       bundle_id: bundleId,
-      editor_name: historyEntry?.editorName || EDITOR_DISPLAY_NAMES[bundleId] || bundleId,
+      editor_name: historyEntry.editorName || EDITOR_DISPLAY_NAMES[bundleId] || bundleId,
     });
   }
 
-  return migrated;
+  return changed ? migrated : savedTabs;
 }
