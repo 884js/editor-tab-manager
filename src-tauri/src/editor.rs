@@ -3,16 +3,28 @@ use crate::editor_config::{EditorConfig, EDITORS};
 use crate::editor_model::{EditorSession, NativeEditorWindow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub use crate::editor_model::{EditorState, EditorWindow, WorkspaceResolution};
 
 type WindowPathCacheKey = (String, u32, String);
 type WorkspacePathOwnerKey = (String, PathBuf);
+const PENDING_PROJECT_OPEN_TTL: Duration = Duration::from_secs(30);
 
 lazy_static::lazy_static! {
     /// Editor ID + window ID + project name -> full path
     static ref WINDOW_PATH_CACHE: std::sync::Mutex<HashMap<WindowPathCacheKey, PathBuf>> =
         std::sync::Mutex::new(HashMap::new());
+    static ref PENDING_PROJECT_OPENS:
+        std::sync::Mutex<HashMap<String, Vec<PendingProjectOpen>>> =
+        std::sync::Mutex::new(HashMap::new());
+}
+
+#[derive(Clone)]
+struct PendingProjectOpen {
+    path: PathBuf,
+    existing_window_ids: HashSet<u32>,
+    created_at: Instant,
 }
 
 #[derive(Default)]
@@ -150,6 +162,7 @@ fn collect_editor_windows(
         .map(|window| (window.id, window.title.clone(), window.is_frontmost))
         .collect::<Vec<_>>();
     prepare_window_path_resolution(config, &ax_windows, &workspace_state);
+    let pending_resolutions = take_pending_project_open_paths(config, &native_windows);
     let project_window_counts = count_project_windows(config, &ax_windows);
 
     for (window_id, (path, _)) in &session_resolutions {
@@ -182,7 +195,8 @@ fn collect_editor_windows(
                         project_window_counts.get(&name).copied().unwrap_or(1),
                         &workspace_state,
                     )
-                });
+                })
+                .or_else(|| pending_resolutions.get(&window.id).cloned());
             let resolution = session_resolution
                 .map(|(_, resolution)| *resolution)
                 .or_else(|| resolved_path.as_ref().map(|_| WorkspaceResolution::Inferred))
@@ -820,6 +834,139 @@ fn find_zed_cli() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+fn current_editor_window_ids(config: &EditorConfig) -> HashSet<u32> {
+    let Some(pid) = ax_helper::get_pid_by_bundle_id(config.bundle_id) else {
+        return HashSet::new();
+    };
+    ax_helper::get_native_windows_ax(pid, config.bundle_id, config.id == "cursor")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|window| window.id)
+        .collect()
+}
+
+fn project_path_matches_name(path: &Path, project_name: &str) -> bool {
+    if path.file_name().and_then(|name| name.to_str()) == Some(project_name) {
+        return true;
+    }
+    find_git_root(path)
+        .and_then(|root| get_repository_info(&root))
+        .is_some_and(|(_, repository_name)| repository_name == project_name)
+}
+
+fn match_pending_project_opens(
+    config: &EditorConfig,
+    pending_opens: &[PendingProjectOpen],
+    native_windows: &[NativeEditorWindow],
+) -> (HashMap<u32, PathBuf>, HashSet<usize>) {
+    let windows = native_windows
+        .iter()
+        .filter(|window| !window.title.is_empty() && window.title != "Untitled")
+        .map(|window| (window.id, extract_project_name(&window.title, config)))
+        .collect::<Vec<_>>();
+    let mut pending_indices = (0..pending_opens.len()).collect::<Vec<_>>();
+    pending_indices.sort_by_key(|index| {
+        std::cmp::Reverse(pending_opens[*index].existing_window_ids.len())
+    });
+
+    let mut assigned_window_ids = HashSet::new();
+    let mut consumed_pending_indices = HashSet::new();
+    let mut matches = HashMap::new();
+
+    for index in pending_indices {
+        let pending = &pending_opens[index];
+        let candidates = windows
+            .iter()
+            .filter(|(window_id, project_name)| {
+                !pending.existing_window_ids.contains(window_id)
+                    && !assigned_window_ids.contains(window_id)
+                    && project_path_matches_name(&pending.path, project_name)
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() != 1 {
+            continue;
+        }
+
+        let (window_id, project_name) = candidates[0];
+        let has_competing_open = pending_opens
+            .iter()
+            .enumerate()
+            .any(|(other_index, other)| {
+                other_index != index
+                    && !consumed_pending_indices.contains(&other_index)
+                    && other.existing_window_ids == pending.existing_window_ids
+                    && project_path_matches_name(&other.path, project_name)
+            });
+        if has_competing_open {
+            continue;
+        }
+
+        assigned_window_ids.insert(*window_id);
+        consumed_pending_indices.insert(index);
+        matches.insert(*window_id, pending.path.clone());
+    }
+
+    (matches, consumed_pending_indices)
+}
+
+fn register_pending_project_open(
+    config: &EditorConfig,
+    path: &Path,
+    existing_window_ids: HashSet<u32>,
+) {
+    if let Ok(mut pending_by_editor) = PENDING_PROJECT_OPENS.lock() {
+        pending_by_editor
+            .entry(config.id.to_string())
+            .or_default()
+            .push(PendingProjectOpen {
+                path: path.to_path_buf(),
+                existing_window_ids,
+                created_at: Instant::now(),
+            });
+    }
+}
+
+fn take_pending_project_open_paths(
+    config: &EditorConfig,
+    native_windows: &[NativeEditorWindow],
+) -> HashMap<u32, PathBuf> {
+    let pending_opens = match PENDING_PROJECT_OPENS.lock() {
+        Ok(mut pending_by_editor) => pending_by_editor.remove(config.id).unwrap_or_default(),
+        Err(_) => return HashMap::new(),
+    };
+    let now = Instant::now();
+    let pending_opens = pending_opens
+        .into_iter()
+        .filter(|pending| now.duration_since(pending.created_at) <= PENDING_PROJECT_OPEN_TTL)
+        .collect::<Vec<_>>();
+    let (matches, consumed_indices) =
+        match_pending_project_opens(config, &pending_opens, native_windows);
+
+    let remaining = pending_opens
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, pending)| {
+            (!consumed_indices.contains(&index)).then_some(pending)
+        })
+        .collect::<Vec<_>>();
+    if !remaining.is_empty() {
+        if let Ok(mut pending_by_editor) = PENDING_PROJECT_OPENS.lock() {
+            pending_by_editor
+                .entry(config.id.to_string())
+                .or_default()
+                .extend(remaining);
+        }
+    }
+
+    for (window_id, path) in &matches {
+        if let Some(window) = native_windows.iter().find(|window| window.id == *window_id) {
+            let project_name = extract_project_name(&window.title, config);
+            cache_window_path(config.id, *window_id, &project_name, path);
+        }
+    }
+    matches
+}
+
 fn build_project_open_command(
     config: &EditorConfig,
     path: &str,
@@ -847,11 +994,13 @@ pub fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String>
         return Err(format!("Project path does not exist: {}", path));
     }
 
+    let existing_window_ids = current_editor_window_ids(config);
     let zed_cli = (config.id == "zed").then(find_zed_cli).flatten();
     let status = build_project_open_command(config, path, zed_cli.as_deref())?
         .status()
         .map_err(|e| format!("Failed to open project: {}", e))?;
     if status.success() {
+        register_pending_project_open(config, Path::new(path), existing_window_ids);
         Ok(())
     } else {
         Err(format!("Failed to open project in {}", config.display_name))
@@ -877,6 +1026,14 @@ mod tests {
 
     fn native_window(id: u32, title: &str) -> NativeEditorWindow {
         NativeEditorWindow::new("cursor", 10, id, title.to_string(), false, Vec::new())
+    }
+
+    fn pending_open(path: &str, existing_window_ids: &[u32]) -> PendingProjectOpen {
+        PendingProjectOpen {
+            path: PathBuf::from(path),
+            existing_window_ids: existing_window_ids.iter().copied().collect(),
+            created_at: Instant::now(),
+        }
     }
 
     #[test]
@@ -920,6 +1077,66 @@ mod tests {
             command.get_args().collect::<Vec<_>>(),
             ["-a", "Visual Studio Code", "/projects/api"]
         );
+    }
+
+    #[test]
+    fn pending_open_matches_a_new_window_for_vscode_and_cursor() {
+        for (bundle_id, title) in [
+            ("com.microsoft.VSCode", "api — Visual Studio Code"),
+            ("com.todesktop.230313mzl4w4u92", "api — Cursor"),
+        ] {
+            let config = crate::editor_config::get_editor_by_bundle_id(bundle_id).unwrap();
+            let pending = vec![pending_open("/projects/api", &[100])];
+            let windows = vec![native_window(100, title), native_window(200, title)];
+
+            let (matches, consumed) =
+                match_pending_project_opens(config, &pending, &windows);
+
+            assert_eq!(matches[&200], PathBuf::from("/projects/api"));
+            assert_eq!(consumed, HashSet::from([0]));
+        }
+    }
+
+    #[test]
+    fn pending_opens_match_same_named_zed_worktrees_by_new_window_id() {
+        let config =
+            crate::editor_config::get_editor_by_bundle_id("dev.zed.Zed").unwrap();
+        let pending = vec![
+            pending_open("/worktrees/one/project", &[100]),
+            pending_open("/worktrees/two/project", &[100, 200]),
+        ];
+        let windows = vec![
+            native_window(100, "project"),
+            native_window(200, "project"),
+            native_window(300, "project"),
+        ];
+
+        let (matches, consumed) =
+            match_pending_project_opens(config, &pending, &windows);
+
+        assert_eq!(matches[&200], PathBuf::from("/worktrees/one/project"));
+        assert_eq!(matches[&300], PathBuf::from("/worktrees/two/project"));
+        assert_eq!(consumed, HashSet::from([0, 1]));
+    }
+
+    #[test]
+    fn pending_opens_do_not_guess_when_same_named_windows_are_ambiguous() {
+        let config =
+            crate::editor_config::get_editor_by_bundle_id("dev.zed.Zed").unwrap();
+        let pending = vec![
+            pending_open("/worktrees/one/project", &[100]),
+            pending_open("/worktrees/two/project", &[100]),
+        ];
+        let windows = vec![
+            native_window(100, "project"),
+            native_window(200, "project"),
+        ];
+
+        let (matches, consumed) =
+            match_pending_project_opens(config, &pending, &windows);
+
+        assert!(matches.is_empty());
+        assert!(consumed.is_empty());
     }
 
     fn editor_session(id: u32, title: &str, path: Option<&str>) -> EditorSession {
