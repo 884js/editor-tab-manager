@@ -2,6 +2,7 @@ import type { EditorWindow, SavedTab } from "../types/editor";
 import {
   migrateLegacySavedTabs,
   migrateSavedTabKeys,
+  mergeProjectMetadata,
   reconcilePersistentTabs,
   savedTabsDiffer,
 } from "./persistentTabs";
@@ -169,6 +170,49 @@ describe("savedTabsDiffer", () => {
 
     expect(savedTabsDiffer([vscode], [cursor])).toBe(true);
     expect(savedTabsDiffer([vscode], [vscode])).toBe(false);
+  });
+});
+
+describe("mergeProjectMetadata", () => {
+  it("restores missing branch and repository fields from a saved path", () => {
+    const saved: SavedTab[] = [{
+      name: "project",
+      path: "/worktrees/feature/project",
+      bundle_id: "dev.zed.Zed",
+      editor_name: "Zed",
+    }];
+
+    expect(mergeProjectMetadata(saved, [{
+      path: "/worktrees/feature/project",
+      branch: "feature/saved-tab",
+      repository_id: "/projects/project/.git",
+      repository_name: "project",
+    }])).toEqual([
+      expect.objectContaining({
+        branch: "feature/saved-tab",
+        repository_id: "/projects/project/.git",
+        repository_name: "project",
+      }),
+    ]);
+  });
+
+  it("preserves metadata already stored on the tab", () => {
+    const saved: SavedTab[] = [{
+      name: "project",
+      path: "/projects/project",
+      branch: "current",
+      repository_id: "/projects/project/.git",
+      repository_name: "project",
+      bundle_id: "com.microsoft.VSCode",
+      editor_name: "VSCode",
+    }];
+
+    expect(mergeProjectMetadata(saved, [{
+      path: "/projects/project",
+      branch: "other",
+      repository_id: "/projects/other/.git",
+      repository_name: "other",
+    }])).toEqual(saved);
   });
 });
 

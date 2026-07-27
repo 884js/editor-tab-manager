@@ -29,6 +29,13 @@ export interface SavedTab {
   resolution?: "exact" | "inferred" | "unresolved";
 }
 
+export interface ProjectMetadata {
+  path: string;
+  branch: string | null;
+  repository_id: string | null;
+  repository_name: string | null;
+}
+
 export interface WindowsSnapshot {
   revision: number;
   windows: EditorWindow[];

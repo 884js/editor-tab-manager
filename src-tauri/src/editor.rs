@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub use crate::editor_model::{EditorState, EditorWindow, WorkspaceResolution};
+pub use crate::editor_model::{
+    EditorState, EditorWindow, ProjectMetadata, WorkspaceResolution,
+};
 
 type WindowPathCacheKey = (String, u32, String);
 type WorkspacePathOwnerKey = (String, PathBuf);
@@ -787,6 +789,25 @@ fn get_git_branch(git_root: &std::path::Path) -> Option<String> {
     }
 }
 
+pub fn get_project_metadata(paths: Vec<String>) -> Vec<ProjectMetadata> {
+    let mut seen_paths = HashSet::new();
+    paths
+        .into_iter()
+        .filter(|path| seen_paths.insert(path.clone()))
+        .map(|path| {
+            let git_root = find_git_root(Path::new(&path));
+            let branch = git_root.as_ref().and_then(|root| get_git_branch(root));
+            let repository = git_root.as_ref().and_then(|root| get_repository_info(root));
+            ProjectMetadata {
+                path,
+                branch,
+                repository_id: repository.as_ref().map(|(id, _)| id.clone()),
+                repository_name: repository.map(|(_, name)| name),
+            }
+        })
+        .collect()
+}
+
 /// Focus a specific editor window by CGWindowID
 /// Uses CGWindowID for reliable window identification regardless of title changes
 pub fn focus_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
@@ -1346,6 +1367,46 @@ mod tests {
 
         assert_eq!(main_info, worktree_info);
         assert_eq!(main_info.1, "project");
+    }
+
+    #[test]
+    fn project_metadata_restores_linked_worktree_git_information() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("project");
+        let main_git = main.join(".git");
+        let worktree_git = main_git.join("worktrees/feature");
+        fs::create_dir_all(&worktree_git).unwrap();
+
+        let worktree = tmp.path().join("project-feature");
+        fs::create_dir(&worktree).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_git.display()),
+        )
+        .unwrap();
+        fs::write(worktree_git.join("commondir"), "../..\n").unwrap();
+        fs::write(
+            worktree_git.join("HEAD"),
+            "ref: refs/heads/feature/saved-tab\n",
+        )
+        .unwrap();
+
+        let metadata =
+            get_project_metadata(vec![worktree.to_string_lossy().to_string()]);
+
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(
+            metadata[0].branch,
+            Some("feature/saved-tab".to_string())
+        );
+        assert_eq!(
+            metadata[0].repository_id,
+            Some(std::fs::canonicalize(main_git).unwrap().to_string_lossy().to_string())
+        );
+        assert_eq!(
+            metadata[0].repository_name,
+            Some("project".to_string())
+        );
     }
 
     #[test]

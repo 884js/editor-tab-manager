@@ -5,7 +5,7 @@ import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
 import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS, EDITOR_DISPLAY_NAMES } from "../types/editor";
-import type { EditorWindow, WindowsSnapshot, GroupDefinition, GroupAssignment, ProjectEditorBundleId, SavedTab, TabColorMap } from "../types/editor";
+import type { EditorWindow, WindowsSnapshot, GroupDefinition, GroupAssignment, ProjectEditorBundleId, ProjectMetadata, SavedTab, TabColorMap } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
@@ -32,6 +32,7 @@ import {
 import {
   migrateSavedTabKeys,
   migrateLegacySavedTabs,
+  mergeProjectMetadata,
   reconcilePersistentTabs,
   savedTabKey,
   savedTabsDiffer,
@@ -166,7 +167,26 @@ export function useEditorWindows({
           loadCollapsedGroups(),
           loadGroupColors(),
         ]);
-        const initialSavedTabs = migrateLegacySavedTabs(savedTabs, order, history);
+        const migratedSavedTabs = migrateLegacySavedTabs(savedTabs, order, history);
+        const metadataPaths = [...new Set(
+          migratedSavedTabs
+            .filter((tab) =>
+              !tab.branch || !tab.repository_id || !tab.repository_name
+            )
+            .map((tab) => normalizeProjectPath(tab.path))
+            .filter(Boolean),
+        )];
+        let initialSavedTabs = migratedSavedTabs;
+        if (metadataPaths.length > 0) {
+          try {
+            const metadata = await invoke<ProjectMetadata[]>("get_project_metadata", {
+              paths: metadataPaths,
+            });
+            initialSavedTabs = mergeProjectMetadata(migratedSavedTabs, metadata);
+          } catch (error) {
+            console.error("Failed to load project metadata:", error);
+          }
+        }
         tabOrderRef.current = order;
         savedTabsRef.current = initialSavedTabs;
         if (savedTabsDiffer(initialSavedTabs, savedTabs)) {

@@ -193,6 +193,50 @@ describe("useEditorWindows", () => {
       ]);
     });
 
+    it("restores missing Git metadata from a saved tab path", async () => {
+      mockLoadSavedTabs.mockResolvedValue([{
+        name: "saved-project",
+        path: "/worktrees/feature/saved-project",
+        bundle_id: "dev.zed.Zed",
+        editor_name: "Zed",
+      }]);
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "get_project_metadata") {
+          return [{
+            path: "/worktrees/feature/saved-project",
+            branch: "feature/saved-tab",
+            repository_id: "/projects/saved-project/.git",
+            repository_name: "saved-project",
+          }];
+        }
+        return [];
+      });
+      const { result } = setup();
+
+      await act(async () => {
+        await result.current.fetchWindows();
+      });
+
+      expect(invoke).toHaveBeenCalledWith("get_project_metadata", {
+        paths: ["/worktrees/feature/saved-project"],
+      });
+      expect(result.current.windows).toEqual([
+        expect.objectContaining({
+          branch: "feature/saved-tab",
+          repository_id: "/projects/saved-project/.git",
+          repository_name: "saved-project",
+          is_open: false,
+        }),
+      ]);
+      expect(mockSaveSavedTabs).toHaveBeenCalledWith([
+        expect.objectContaining({
+          branch: "feature/saved-tab",
+          repository_id: "/projects/saved-project/.git",
+          repository_name: "saved-project",
+        }),
+      ]);
+    });
+
     it("migrates the previous tab order when saved tabs have not been created yet", async () => {
       mockLoadTabOrder.mockResolvedValue([
         "com.microsoft.VSCode:/projects/legacy-project",

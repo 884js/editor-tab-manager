@@ -54,6 +54,11 @@ fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String> {
     editor::open_project_in_editor(bundle_id, path)
 }
 
+#[tauri::command]
+fn get_project_metadata(paths: Vec<String>) -> Vec<editor::ProjectMetadata> {
+    editor::get_project_metadata(paths)
+}
+
 #[tauri::command(rename_all = "snake_case")]
 fn maximize_editor_window(bundle_id: &str, window_id: u32, tab_bar_height: f64) -> Result<(), String> {
     window_offset::maximize_window(bundle_id, window_id, tab_bar_height)
@@ -265,6 +270,7 @@ pub fn run() {
             open_new_editor,
             close_editor_window,
             open_project_in_editor,
+            get_project_metadata,
             maximize_editor_window,
             is_editor_active,
             // File operations

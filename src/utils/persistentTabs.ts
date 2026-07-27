@@ -2,6 +2,7 @@ import {
   EDITOR_DISPLAY_NAMES,
   type EditorWindow,
   type HistoryEntry,
+  type ProjectMetadata,
   type SavedTab,
 } from "../types/editor";
 import { normalizeProjectPath, runtimeWindowKey, windowKey } from "./store";
@@ -141,6 +142,25 @@ export function savedTabsDiffer(a: SavedTab[], b: SavedTab[]): boolean {
       tab.bundle_id !== other.bundle_id ||
       tab.editor_name !== other.editor_name ||
       tab.resolution !== other.resolution;
+  });
+}
+
+export function mergeProjectMetadata(
+  savedTabs: SavedTab[],
+  metadata: ProjectMetadata[],
+): SavedTab[] {
+  const metadataByPath = new Map(
+    metadata.map((item) => [normalizeProjectPath(item.path), item]),
+  );
+  return savedTabs.map((tab) => {
+    const item = metadataByPath.get(normalizeProjectPath(tab.path));
+    if (!item) return tab;
+    return {
+      ...tab,
+      branch: tab.branch ?? item.branch ?? undefined,
+      repository_id: tab.repository_id ?? item.repository_id ?? undefined,
+      repository_name: tab.repository_name ?? item.repository_name ?? undefined,
+    };
   });
 }
 
