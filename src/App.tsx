@@ -120,6 +120,7 @@ function App() {
       showAddMenu={history.showAddMenu}
       onAddMenuOpen={lifecycle.handleAddMenuOpen}
       onAddMenuClose={lifecycle.handleAddMenuClose}
+      onAddMenuHandoff={lifecycle.handleAddMenuHandoff}
       onEditorPickerOpen={lifecycle.handleEditorPickerOpen}
       onEditorPickerClose={lifecycle.handleEditorPickerClose}
       onHistorySelect={(entry, bundleId) =>

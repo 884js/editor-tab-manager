@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState, type ComponentProps } from "react";
 import type { EditorWindow } from "../types/editor";
 import { repositoryColorKey, windowKey } from "../utils/store";
 import TabBar from "./TabBar";
@@ -45,6 +46,21 @@ const standaloneWindow: EditorWindow = {
   editor_name: "Cursor",
 };
 
+function StatefulTabBar(props: ComponentProps<typeof TabBar>) {
+  const [showAddMenu, setShowAddMenu] = useState(props.showAddMenu);
+
+  return (
+    <TabBar
+      {...props}
+      showAddMenu={showAddMenu}
+      onAddMenuHandoff={() => {
+        props.onAddMenuHandoff();
+        setShowAddMenu(false);
+      }}
+    />
+  );
+}
+
 function setup(
   tabColors: Record<string, string | null> = {},
   tabLayout: "horizontal" | "list" = "horizontal",
@@ -52,6 +68,7 @@ function setup(
   groupAssignments: Record<string, string | null> = {
     [windowKey(cursorWindow)]: "medii",
   },
+  overrides: Partial<ComponentProps<typeof TabBar>> = {},
 ) {
   const onAssignTabsToGroup = vi.fn();
   const onColorChange = vi.fn();
@@ -67,6 +84,7 @@ function setup(
     showAddMenu: false,
     onAddMenuOpen: vi.fn(),
     onAddMenuClose: vi.fn().mockResolvedValue(undefined),
+    onAddMenuHandoff: vi.fn(),
     onEditorPickerOpen: vi.fn().mockResolvedValue(undefined),
     onEditorPickerClose: vi.fn().mockResolvedValue(undefined),
     onHistorySelect: vi.fn().mockResolvedValue(true),
@@ -96,15 +114,16 @@ function setup(
     onTabContextMenuClose: vi.fn().mockResolvedValue(undefined),
     onWorktreeMenuOpen: vi.fn().mockResolvedValue(undefined),
     onWorktreeMenuClose: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
   };
 
-  const view = render(<TabBar {...props} />);
+  const view = render(<StatefulTabBar {...props} />);
   return {
     props,
     onAssignTabsToGroup,
     onColorChange,
     rerenderTabs: (nextTabs: EditorWindow[]) => {
-      view.rerender(<TabBar {...props} tabs={nextTabs} />);
+      view.rerender(<StatefulTabBar {...props} tabs={nextTabs} />);
     },
   };
 }
@@ -276,6 +295,58 @@ describe("TabBar repository grouping", () => {
       undefined,
     );
     expect(props.onTabClick).not.toHaveBeenCalled();
+  });
+
+  it("hands off a recent project to the editor picker without resizing", async () => {
+    const historyEntry = {
+      name: "sample-project",
+      path: "/Users/test/sample-project",
+      timestamp: Date.now(),
+    };
+    const { props } = setup(
+      {},
+      "horizontal",
+      [standaloneWindow],
+      {},
+      {
+        history: [historyEntry],
+        showAddMenu: true,
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^sample-project/ }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "history.chooseEditor" }),
+    ).toBeInTheDocument();
+    expect(props.onAddMenuHandoff).toHaveBeenCalledOnce();
+    expect(props.onAddMenuClose).not.toHaveBeenCalled();
+    expect(props.onEditorPickerOpen).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /^sample-project/ })).not.toBeInTheDocument();
+  });
+
+  it("hands off a new window to the editor picker without resizing", async () => {
+    const { props } = setup(
+      {},
+      "horizontal",
+      [standaloneWindow],
+      {},
+      {
+        showAddMenu: true,
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /history\.newWindow/ }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "history.chooseEditor" }),
+    ).toBeInTheDocument();
+    expect(props.onAddMenuHandoff).toHaveBeenCalledOnce();
+    expect(props.onAddMenuClose).not.toHaveBeenCalled();
+    expect(props.onEditorPickerOpen).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: /history\.newWindow/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("preserves an inherited group when opening a closed worktree tab", async () => {

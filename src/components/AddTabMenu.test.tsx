@@ -35,8 +35,8 @@ describe("AddTabMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /^sample-project/ }));
 
     await vi.waitFor(() => {
-      expect(onClose).toHaveBeenCalledOnce();
       expect(onSelectHistory).toHaveBeenCalledWith(historyEntry, expect.anything());
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 
@@ -46,8 +46,18 @@ describe("AddTabMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /history\.newWindow/ }));
 
     await vi.waitFor(() => {
-      expect(onClose).toHaveBeenCalledOnce();
       expect(onNewWindow).toHaveBeenCalledWith(expect.anything());
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  it("closes normally when pressing Escape", async () => {
+    const { onClose } = renderMenu();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
     });
   });
 

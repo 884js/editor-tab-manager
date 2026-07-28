@@ -28,6 +28,7 @@ interface TabBarProps {
   showAddMenu: boolean;
   onAddMenuOpen: () => void;
   onAddMenuClose: () => Promise<void>;
+  onAddMenuHandoff: () => void;
   onEditorPickerOpen: () => Promise<void>;
   onEditorPickerClose: () => Promise<void>;
   onHistorySelect: (entry: HistoryEntry, bundleId: ProjectEditorBundleId) => Promise<boolean>;
@@ -105,7 +106,7 @@ const getTabGroupId = (
   );
 
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onEditorPickerOpen, onEditorPickerClose, onHistorySelect, onClosedTabOpen, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onAddMenuHandoff, onEditorPickerOpen, onEditorPickerClose, onHistorySelect, onClosedTabOpen, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<{ key: string; currentColorId: string | null } | null>(null);
@@ -753,7 +754,9 @@ function TabBar(props: TabBarProps) {
         <AddTabMenu
           entries={history}
           onNewWindow={async (anchorRect) => {
-            await onEditorPickerOpen();
+            onAddMenuHandoff();
+            // Finish the current input event before mounting the next overlay.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
             setEditorPickerTarget({
               kind: "new-window",
               name: t("history.newWindow"),
@@ -761,7 +764,9 @@ function TabBar(props: TabBarProps) {
             });
           }}
           onSelectHistory={async (entry, anchorRect) => {
-            await onEditorPickerOpen();
+            onAddMenuHandoff();
+            // Finish the current input event before mounting the next overlay.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
             setEditorPickerTarget({
               kind: "history",
               name: entry.name,

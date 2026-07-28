@@ -75,7 +75,6 @@ function AddTabMenu({
           style={styles.newWindowButton}
           onClick={async (event) => {
             const anchorRect = event.currentTarget.getBoundingClientRect();
-            await onClose();
             await onNewWindow(anchorRect);
           }}
           onMouseEnter={(event) => {
@@ -101,7 +100,6 @@ function AddTabMenu({
                   style={styles.historyItem}
                   onClick={async (event) => {
                     const anchorRect = event.currentTarget.getBoundingClientRect();
-                    await onClose();
                     await onSelectHistory(entry, anchorRect);
                   }}
                   onMouseEnter={(event) => {
