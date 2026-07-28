@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import type { EditorWindow, HistoryEntry } from "../types/editor";
-import { normalizeProjectPath, windowKey } from "../utils/store";
+import type { HistoryEntry } from "../types/editor";
+import { normalizeProjectPath } from "../utils/store";
 
 interface AddTabMenuProps {
   entries: HistoryEntry[];
-  currentWindows: EditorWindow[];
-  onNewWindow: () => void;
-  onSelectHistory: (entry: HistoryEntry) => void;
+  onNewWindow: (anchorRect: DOMRect) => Promise<void>;
+  onSelectHistory: (entry: HistoryEntry, anchorRect: DOMRect) => Promise<void>;
   onClearHistory: () => void;
-  onClose: () => void;
+  onClose: () => Promise<void>;
   anchorRef: RefObject<HTMLButtonElement | null>;
 }
 
-function formatRelativeTime(timestamp: number, t: (key: string, options?: Record<string, unknown>) => string): string {
+function formatRelativeTime(
+  timestamp: number,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
@@ -25,49 +27,34 @@ function formatRelativeTime(timestamp: number, t: (key: string, options?: Record
   return t("history.daysAgo", { count: days });
 }
 
-function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onClearHistory, onClose, anchorRef }: AddTabMenuProps) {
+function AddTabMenu({
+  entries,
+  onNewWindow,
+  onSelectHistory,
+  onClearHistory,
+  onClose,
+  anchorRef,
+}: AddTabMenuProps) {
   const { t } = useTranslation();
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Filter out currently open tabs from history
-  const currentWindowKeys = new Set(currentWindows.map(windowKey));
-  const filteredEntries = entries.filter(
-    (entry) => !currentWindowKeys.has(`${entry.bundleId}:${normalizeProjectPath(entry.path)}`)
-  );
-
-  // Calculate position from anchor button
   useEffect(() => {
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      const MENU_WIDTH = 280;
-      const VIEWPORT_PADDING = 4;
+    if (!anchorRef.current) return;
 
-      // デフォルト: ボタンの右端にメニューの右端を揃える
-      let left = rect.right - MENU_WIDTH;
-
-      // 左端がviewport外に出ないようクランプ
-      if (left < VIEWPORT_PADDING) {
-        left = VIEWPORT_PADDING;
-      }
-
-      // 右端がviewport外に出ないようクランプ
-      if (left + MENU_WIDTH > window.innerWidth - VIEWPORT_PADDING) {
-        left = window.innerWidth - MENU_WIDTH - VIEWPORT_PADDING;
-      }
-
-      setMenuPos({
-        top: rect.bottom + 4,
-        left,
-      });
-    }
+    const rect = anchorRef.current.getBoundingClientRect();
+    const menuWidth = 280;
+    const viewportPadding = 4;
+    const left = Math.min(
+      Math.max(viewportPadding, rect.right - menuWidth),
+      window.innerWidth - menuWidth - viewportPadding,
+    );
+    setMenuPos({ top: rect.bottom + 4, left });
   }, [anchorRef]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -75,7 +62,7 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
 
   return (
     <>
-      <div style={styles.overlay} onClick={onClose} />
+      <div style={styles.overlay} onClick={() => void onClose()} />
       <div
         ref={menuRef}
         style={{
@@ -83,75 +70,69 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
           ...(menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 40, left: 8 }),
         }}
       >
-        {/* New Window */}
         <button
+          type="button"
           style={styles.newWindowButton}
-          onClick={() => {
-            onNewWindow();
-            onClose();
+          onClick={async (event) => {
+            const anchorRect = event.currentTarget.getBoundingClientRect();
+            await onNewWindow(anchorRect);
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#3a3a3a";
+          onMouseEnter={(event) => {
+            event.currentTarget.style.background = "#3a3a3a";
           }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = "transparent";
           }}
         >
           <span style={styles.newWindowIcon}>+</span>
           <span>{t("history.newWindow")}</span>
         </button>
 
-        {/* History section */}
-        {filteredEntries.length > 0 && (
+        {entries.length > 0 ? (
           <>
             <div style={styles.separator} />
             <div style={styles.sectionHeader}>{t("history.recentProjects")}</div>
             <div style={styles.historyList}>
-              {filteredEntries.map((entry) => (
+              {entries.map((entry) => (
                 <button
-                  key={`${entry.bundleId}:${entry.path}`}
+                  key={normalizeProjectPath(entry.path)}
+                  type="button"
                   style={styles.historyItem}
-                  onClick={() => {
-                    onSelectHistory(entry);
-                    onClose();
+                  onClick={async (event) => {
+                    const anchorRect = event.currentTarget.getBoundingClientRect();
+                    await onSelectHistory(entry, anchorRect);
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#3a3a3a";
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.background = "#3a3a3a";
                   }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.background = "transparent";
                   }}
                 >
-                  <div style={styles.historyItemContent}>
-                    <div style={styles.historyItemTop}>
-                      <span style={styles.historyName}>{entry.name}</span>
-                      <span style={styles.historyEditor}>{entry.editorName}</span>
-                    </div>
-                    <span style={styles.historyTime}>{formatRelativeTime(entry.timestamp, t)}</span>
-                  </div>
+                  <span style={styles.historyName}>{entry.name}</span>
+                  <span style={styles.historyTime}>{formatRelativeTime(entry.timestamp, t)}</span>
                 </button>
               ))}
             </div>
             <div style={styles.separator} />
             <button
+              type="button"
               style={styles.clearButton}
               onClick={() => {
                 onClearHistory();
                 onClose();
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#3a3a3a";
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = "#3a3a3a";
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = "transparent";
               }}
             >
               {t("history.clear")}
             </button>
           </>
-        )}
-
-        {filteredEntries.length === 0 && (
+        ) : (
           <>
             <div style={styles.separator} />
             <div style={styles.emptyText}>{t("history.empty")}</div>
@@ -165,10 +146,7 @@ function AddTabMenu({ entries, currentWindows, onNewWindow, onSelectHistory, onC
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    inset: 0,
     zIndex: 100,
   },
   container: {
@@ -198,70 +176,49 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
   },
   newWindowIcon: {
-    fontSize: "16px",
-    color: "rgba(255, 255, 255, 0.7)",
     width: "20px",
-    textAlign: "center" as const,
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: "16px",
+    textAlign: "center",
   },
   separator: {
     height: "1px",
+    margin: 0,
     background: "#404040",
-    margin: "0",
   },
   sectionHeader: {
     padding: "6px 12px 4px",
-    fontSize: "11px",
     color: "rgba(255, 255, 255, 0.4)",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.5px",
+    fontSize: "11px",
+    textTransform: "uppercase",
   },
   historyList: {
-    overflowY: "auto" as const,
     maxHeight: "300px",
+    overflowY: "auto",
   },
   historyItem: {
     display: "flex",
-    alignItems: "center",
+    flexDirection: "column",
+    gap: "2px",
     width: "100%",
     padding: "6px 12px",
     border: "none",
     background: "transparent",
     color: "#e0e0e0",
-    fontSize: "13px",
     cursor: "pointer",
     textAlign: "left",
   },
-  historyItemContent: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "2px",
-    width: "100%",
-    overflow: "hidden",
-  },
-  historyItemTop: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "8px",
-  },
   historyName: {
     overflow: "hidden",
+    fontSize: "13px",
     textOverflow: "ellipsis",
-    whiteSpace: "nowrap" as const,
-    flex: 1,
-  },
-  historyEditor: {
-    fontSize: "11px",
-    color: "rgba(255, 255, 255, 0.4)",
-    flexShrink: 0,
+    whiteSpace: "nowrap",
   },
   historyTime: {
-    fontSize: "11px",
     color: "rgba(255, 255, 255, 0.35)",
+    fontSize: "11px",
   },
   clearButton: {
-    display: "flex",
-    alignItems: "center",
     width: "100%",
     padding: "8px 12px",
     border: "none",
@@ -273,9 +230,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   emptyText: {
     padding: "12px",
-    fontSize: "12px",
     color: "rgba(255, 255, 255, 0.35)",
-    textAlign: "center" as const,
+    fontSize: "12px",
+    textAlign: "center",
   },
 };
 

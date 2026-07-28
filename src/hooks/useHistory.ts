@@ -1,12 +1,11 @@
 import { useEffect, useState, useCallback, useRef, type MutableRefObject } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { EDITOR_DISPLAY_NAMES, MAX_HISTORY_ENTRIES } from "../types/editor";
+import { MAX_HISTORY_ENTRIES } from "../types/editor";
 import type { EditorWindow, HistoryEntry } from "../types/editor";
-import { loadHistory, normalizeProjectPath, saveHistory } from "../utils/store";
-
-interface UseHistoryParams {
-  refreshWindowsRef: MutableRefObject<() => Promise<void>>;
-}
+import {
+  loadHistory,
+  normalizeProjectPath,
+  saveHistory,
+} from "../utils/store";
 
 interface UseHistoryReturn {
   history: HistoryEntry[];
@@ -15,11 +14,24 @@ interface UseHistoryReturn {
   showAddMenuRef: MutableRefObject<boolean>;
   setShowAddMenu: (show: boolean) => void;
   addToHistory: (disappeared: EditorWindow[]) => void;
-  handleOpenFromHistory: (entry: HistoryEntry) => Promise<void>;
   handleClearHistory: () => void;
 }
 
-export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryReturn {
+function migrateHistory(entries: HistoryEntry[]): HistoryEntry[] {
+  const seen = new Set<string>();
+  return entries.flatMap((entry) => {
+    const path = normalizeProjectPath(entry.path);
+    if (seen.has(path)) return [];
+    seen.add(path);
+    return [{
+      name: entry.name,
+      path,
+      timestamp: entry.timestamp,
+    }];
+  });
+}
+
+export function useHistory(): UseHistoryReturn {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const historyRef = useRef<HistoryEntry[]>([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -37,8 +49,19 @@ export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryR
   // Load history from store on startup
   useEffect(() => {
     loadHistory().then((entries) => {
-      setHistory(entries);
-      historyRef.current = entries;
+      const migrated = migrateHistory(entries);
+      setHistory(migrated);
+      historyRef.current = migrated;
+      if (
+        migrated.length !== entries.length ||
+        entries.some((entry, index) =>
+          Boolean(entry.bundleId) ||
+          Boolean(entry.editorName) ||
+          entry.path !== migrated[index]?.path
+        )
+      ) {
+        saveHistory(migrated);
+      }
     });
   }, []);
 
@@ -51,21 +74,13 @@ export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryR
       for (const win of disappeared) {
         if (!win.path) continue;
 
-        const bundleId = win.bundle_id;
-        const editorName = EDITOR_DISPLAY_NAMES[bundleId] || win.editor_name || bundleId;
-
         updated = updated.filter(
-          (e) => !(
-            normalizeProjectPath(e.path) === normalizeProjectPath(win.path) &&
-            e.bundleId === bundleId
-          )
+          (entry) => normalizeProjectPath(entry.path) !== normalizeProjectPath(win.path)
         );
 
         updated.unshift({
           name: win.name,
           path: win.path,
-          bundleId,
-          editorName,
           timestamp: now,
         });
       }
@@ -80,21 +95,6 @@ export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryR
     });
   }, []);
 
-  const handleOpenFromHistory = useCallback(
-    async (entry: HistoryEntry) => {
-      try {
-        await invoke("open_project_in_editor", {
-          bundle_id: entry.bundleId,
-          path: entry.path,
-        });
-        setTimeout(() => refreshWindowsRef.current(), 1500);
-      } catch (error) {
-        console.error("Failed to open project from history:", error);
-      }
-    },
-    [refreshWindowsRef]
-  );
-
   const handleClearHistory = useCallback(() => {
     setHistory([]);
     historyRef.current = [];
@@ -108,7 +108,6 @@ export function useHistory({ refreshWindowsRef }: UseHistoryParams): UseHistoryR
     showAddMenuRef,
     setShowAddMenu,
     addToHistory,
-    handleOpenFromHistory,
     handleClearHistory,
   };
 }

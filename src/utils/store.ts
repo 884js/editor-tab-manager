@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store";
 import type { Store } from "@tauri-apps/plugin-store";
-import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, TabColorMap, TabLayout } from "../types/editor";
+import type { EditorWindow, GroupAssignment, GroupDefinition, HistoryEntry, SavedTab, TabColorMap, TabLayout } from "../types/editor";
 
 // Store instance (lazily initialized)
 let storePromise: Promise<Store> | null = null;
@@ -22,6 +22,7 @@ export const GROUPS_ASSIGNMENTS_KEY = "groups:assignments";
 export const GROUPS_COLLAPSED_KEY = "groups:collapsed";
 export const GROUPS_COLORS_KEY = "groups:colors";
 export const TAB_LAYOUT_KEY = "settings:tabLayout";
+export const SAVED_TABS_KEY = "tabs:saved";
 
 // Generic store helpers
 async function loadValue<T>(key: string, defaultValue: T): Promise<T> {
@@ -48,6 +49,8 @@ export const loadTabColors = () => loadValue<TabColorMap>(UNIFIED_COLOR_KEY, {})
 export const saveTabColors = (colors: TabColorMap) => saveValue(UNIFIED_COLOR_KEY, colors);
 export const loadHistory = () => loadValue<HistoryEntry[]>("history", []);
 export const saveHistory = (entries: HistoryEntry[]) => saveValue("history", entries);
+export const loadSavedTabs = () => loadValue<SavedTab[]>(SAVED_TABS_KEY, []);
+export const saveSavedTabs = (tabs: SavedTab[]) => saveValue(SAVED_TABS_KEY, tabs);
 export const loadGroups = () => loadValue<GroupDefinition[]>(GROUPS_DEFINITIONS_KEY, []);
 export const saveGroups = (groups: GroupDefinition[]) => saveValue(GROUPS_DEFINITIONS_KEY, groups);
 export const loadGroupAssignments = () => loadValue<GroupAssignment>(GROUPS_ASSIGNMENTS_KEY, {});

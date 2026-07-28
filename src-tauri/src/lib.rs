@@ -50,8 +50,17 @@ fn close_editor_window(bundle_id: &str, window_id: u32) -> Result<(), String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn open_project_in_editor(bundle_id: &str, path: &str) -> Result<(), String> {
-    editor::open_project_in_editor(bundle_id, path)
+async fn open_project_in_editor(bundle_id: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        editor::open_project_in_editor(&bundle_id, &path)
+    })
+    .await
+    .map_err(|error| format!("Failed to join project open task: {}", error))?
+}
+
+#[tauri::command]
+fn get_project_metadata(paths: Vec<String>) -> Vec<editor::ProjectMetadata> {
+    editor::get_project_metadata(paths)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -265,6 +274,7 @@ pub fn run() {
             open_new_editor,
             close_editor_window,
             open_project_in_editor,
+            get_project_metadata,
             maximize_editor_window,
             is_editor_active,
             // File operations

@@ -59,6 +59,14 @@ pub struct EditorWindow {
     pub resolution: WorkspaceResolution,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectMetadata {
+    pub path: String,
+    pub branch: Option<String>,
+    pub repository_id: Option<String>,
+    pub repository_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorState {
     pub is_active: bool,

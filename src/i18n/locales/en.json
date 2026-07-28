@@ -1,13 +1,19 @@
 {
   "app": {
     "closeConfirm": "Close \"{{name}}\"?",
+    "closeAndRemoveConfirm": "Close \"{{name}}\" and remove its tab?",
+    "removeTabConfirm": "Remove the \"{{name}}\" tab?",
     "closeConfirmTitle": "Confirm",
     "notificationBody": "Generation complete ✅",
     "untitled": "Untitled"
   },
   "tabBar": {
     "newEditorTooltip": "Open new editor window (Cmd+Shift+T)",
-    "closeTooltip": "Close (Cmd+W)"
+    "closeTooltip": "Close (Cmd+W)",
+    "removeTooltip": "Remove tab",
+    "closedTooltip": "{{name}} (closed — click to open)",
+    "closedLabel": "Closed",
+    "openFailed": "Could not open in the editor"
   },
   "worktree": {
     "openBranches": "Open {{name}} branches",
@@ -73,7 +79,10 @@
     "quit": "Quit Editor Tab Manager"
   },
   "history": {
+    "chooseEditor": "Choose an editor",
+    "cancel": "Cancel",
     "newWindow": "New Window",
+    "openFailed": "Could not open with {{editor}}",
     "recentProjects": "Recent Projects",
     "empty": "No history",
     "clear": "Clear History",

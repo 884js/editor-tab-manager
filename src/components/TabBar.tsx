@@ -5,7 +5,8 @@ import WorktreeTab from "./WorktreeTab";
 import GroupTabList from "./GroupTabList";
 import ColorPicker from "./ColorPicker";
 import AddTabMenu from "./AddTabMenu";
-import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, TabColorMap, TabLayout } from "../types/editor";
+import EditorPicker from "./EditorPicker";
+import type { EditorWindow, ClaudeStatus, HistoryEntry, GroupDefinition, GroupAssignment, ProjectEditorBundleId, TabColorMap, TabLayout } from "../types/editor";
 import { getWindowScopedValue, legacyWindowKey, projectPathMatchesWindow, repositoryColorKey, runtimeWindowKey, windowKey } from "../utils/store";
 import { getColorById } from "../constants/tabColors";
 import { getInheritedRepositoryGroupId, groupRepositoryTabs, type TabEntry } from "../utils/repositoryTabs";
@@ -14,7 +15,7 @@ interface TabBarProps {
   tabs: EditorWindow[];
   activeIndex: number;
   onTabClick: (index: number) => void;
-  onNewTab: () => void;
+  onNewTab: (bundleId?: ProjectEditorBundleId) => Promise<boolean>;
   onCloseTab: (index: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onReorderByVisual: (visualOrder: number[]) => void;
@@ -26,8 +27,16 @@ interface TabBarProps {
   history: HistoryEntry[];
   showAddMenu: boolean;
   onAddMenuOpen: () => void;
-  onAddMenuClose: () => void;
-  onHistorySelect: (entry: HistoryEntry) => void;
+  onAddMenuClose: () => Promise<void>;
+  onAddMenuHandoff: () => void;
+  onEditorPickerOpen: () => Promise<void>;
+  onEditorPickerClose: () => Promise<void>;
+  onHistorySelect: (entry: HistoryEntry, bundleId: ProjectEditorBundleId) => Promise<boolean>;
+  onClosedTabOpen: (
+    index: number,
+    bundleId: ProjectEditorBundleId,
+    groupId?: string,
+  ) => Promise<boolean>;
   onHistoryClear: () => void;
   onColorPickerOpen: () => Promise<void>;
   onColorPickerClose: () => void;
@@ -48,6 +57,17 @@ interface TabBarProps {
   onWorktreeMenuOpen: (rowCount: number) => Promise<void>;
   onWorktreeMenuClose: () => Promise<void>;
 }
+
+type EditorPickerTarget =
+  | { kind: "new-window"; name: string; anchorRect: DOMRect }
+  | { kind: "history"; name: string; entry: HistoryEntry; anchorRect: DOMRect }
+  | {
+      kind: "closed-tab";
+      name: string;
+      tabKey: string;
+      groupId?: string;
+      anchorRect: DOMRect;
+    };
 
 const toRgba = (rgb: { r: number; g: number; b: number }, alpha: number) =>
   `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
@@ -75,8 +95,18 @@ const getListRowCount = (
   );
 };
 
+const getTabGroupId = (
+  assignments: GroupAssignment,
+  tab: EditorWindow,
+): string | null | undefined =>
+  getWindowScopedValue(
+    assignments,
+    tab,
+    legacyWindowKey(tab),
+  );
+
 function TabBar(props: TabBarProps) {
-  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onHistorySelect, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
+  const { tabs, activeIndex, onTabClick, onNewTab, onCloseTab, onReorder, onReorderByVisual, claudeStatuses, tabColors, onColorChange, showBranch, tabLayout, history, showAddMenu, onAddMenuOpen, onAddMenuClose, onAddMenuHandoff, onEditorPickerOpen, onEditorPickerClose, onHistorySelect, onClosedTabOpen, onHistoryClear, onColorPickerOpen, onColorPickerClose, groups, groupAssignments, collapsedGroups, onAddGroup, onUpdateGroup, onDeleteGroup, onAssignTabsToGroup, onUnassignTabsFromGroup, onToggleGroupCollapse, onReorderGroups, groupColors, onSetGroupColor, onTabContextMenuOpen, onTabContextMenuClose, onWorktreeMenuOpen, onWorktreeMenuClose } = props;
   const { t } = useTranslation();
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [colorPickerTarget, setColorPickerTarget] = useState<{ key: string; currentColorId: string | null } | null>(null);
@@ -93,6 +123,7 @@ function TabBar(props: TabBarProps) {
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [groupListAnchorLeft, setGroupListAnchorLeft] = useState(8);
   const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(() => new Set());
+  const [editorPickerTarget, setEditorPickerTarget] = useState<EditorPickerTarget | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const tabsWrapperRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -128,10 +159,48 @@ function TabBar(props: TabBarProps) {
     // Could be used for visual feedback in the future
   }, []);
 
-  // Stable callback that receives index from Tab component
-  const handleTabClick = useCallback((index: number) => {
+  const handleTabClick = useCallback(async (
+    index: number,
+    anchorRect: DOMRect,
+    groupId?: string,
+  ) => {
+    const tab = tabs[index];
+    if (tab?.is_open === false) {
+      await onEditorPickerOpen();
+      setEditorPickerTarget({
+        kind: "closed-tab",
+        name: tab.name,
+        tabKey: windowKey(tab),
+        groupId,
+        anchorRect,
+      });
+      return;
+    }
     onTabClick(index);
-  }, [onTabClick]);
+  }, [onEditorPickerOpen, onTabClick, tabs]);
+
+  const closeEditorPicker = useCallback(async () => {
+    setEditorPickerTarget(null);
+    await onEditorPickerClose();
+  }, [onEditorPickerClose]);
+
+  const handleEditorSelect = useCallback(
+    (bundleId: ProjectEditorBundleId) => {
+      if (!editorPickerTarget) return Promise.resolve(false);
+      if (editorPickerTarget.kind === "new-window") {
+        return onNewTab(bundleId);
+      }
+      if (editorPickerTarget.kind === "history") {
+        return onHistorySelect(editorPickerTarget.entry, bundleId);
+      }
+
+      const index = tabs.findIndex((tab) => windowKey(tab) === editorPickerTarget.tabKey);
+      return index >= 0
+        ? onClosedTabOpen(index, bundleId, editorPickerTarget.groupId)
+        : Promise.resolve(false);
+    },
+    [editorPickerTarget, onClosedTabOpen, onHistorySelect, onNewTab, tabs],
+  );
 
   const handleCloseTab = useCallback((index: number) => {
     onCloseTab(index);
@@ -159,10 +228,10 @@ function TabBar(props: TabBarProps) {
     });
   }, [onTabContextMenuOpen]);
 
-  const closeGroupList = useCallback(() => {
+  const closeGroupList = useCallback(async () => {
     if (openGroupId === null) return;
     setOpenGroupId(null);
-    void onWorktreeMenuClose();
+    await onWorktreeMenuClose();
   }, [onWorktreeMenuClose, openGroupId]);
 
   const toggleRepositoryExpansion = useCallback((repositoryId: string) => {
@@ -180,7 +249,7 @@ function TabBar(props: TabBarProps) {
   const toggleGroupList = useCallback((groupId: string, entries: TabEntry[], rect: DOMRect) => {
     if (entries.length === 0) return;
     if (openGroupId === groupId) {
-      closeGroupList();
+      void closeGroupList();
       return;
     }
     setGroupListAnchorLeft(rect.left);
@@ -361,7 +430,7 @@ function TabBar(props: TabBarProps) {
     for (const item of groupRepositoryTabs(allEntries)) {
       if (item.type !== "repository") continue;
       const inheritedGroupId = getInheritedRepositoryGroupId(item.entries, ({ tab }) => {
-        const groupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
+        const groupId = getTabGroupId(groupAssignments, tab);
         return groupId && groupIds.has(groupId) ? groupId : null;
       });
       for (const { originalIndex } of item.entries) {
@@ -370,7 +439,7 @@ function TabBar(props: TabBarProps) {
     }
 
     tabs.forEach((tab, index) => {
-      const assignedGroupId = getWindowScopedValue(groupAssignments, tab, legacyWindowKey(tab));
+      const assignedGroupId = getTabGroupId(groupAssignments, tab);
       const groupId = repositoryGroupByIndex.has(index)
         ? repositoryGroupByIndex.get(index)
         : assignedGroupId;
@@ -432,13 +501,19 @@ function TabBar(props: TabBarProps) {
     void onWorktreeMenuClose();
   }, [onWorktreeMenuClose, openGroupId, tabLayout]);
 
-  const renderTab = (tab: EditorWindow, originalIndex: number) => (
+  const renderTab = (
+    tab: EditorWindow,
+    originalIndex: number,
+    groupId?: string,
+  ) => (
     <Tab
       key={runtimeWindowKey(tab)}
       name={tab.name}
-      isActive={originalIndex === activeIndex}
+      isActive={tab.is_open !== false && originalIndex === activeIndex}
+      isOpen={tab.is_open !== false}
+      hasOpenError={tab.open_error === true}
       isDragging={originalIndex === draggedIndex}
-      onClick={handleTabClick}
+      onClick={(index, anchorRect) => handleTabClick(index, anchorRect, groupId)}
       onClose={handleCloseTab}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
@@ -452,9 +527,12 @@ function TabBar(props: TabBarProps) {
     />
   );
 
-  const renderRepositoryTabs = (entries: TabEntry[]) => groupRepositoryTabs(entries).map((item) => {
+  const renderRepositoryTabs = (
+    entries: TabEntry[],
+    groupId?: string,
+  ) => groupRepositoryTabs(entries).map((item) => {
     if (item.type === "tab") {
-      return renderTab(item.entry.tab, item.entry.originalIndex);
+      return renderTab(item.entry.tab, item.entry.originalIndex, groupId);
     }
 
     const statuses = new Map(
@@ -471,7 +549,7 @@ function TabBar(props: TabBarProps) {
         activeIndex={activeIndex}
         statuses={statuses}
         colorId={tabColors?.[repositoryColorKey(item.key)] ?? null}
-        onTabClick={handleTabClick}
+        onTabClick={(index, anchorRect) => handleTabClick(index, anchorRect, groupId)}
         onCloseTab={handleCloseTab}
         onMenuOpen={onWorktreeMenuOpen}
         onMenuClose={onWorktreeMenuClose}
@@ -521,7 +599,9 @@ function TabBar(props: TabBarProps) {
           const groupTabs = groupedTabsMap.get(group.id) || [];
           const isCollapsed = collapsedGroups.has(group.id);
           const isListOpen = tabLayout === "list" && openGroupId === group.id;
-          const activeGroupEntry = groupTabs.find(({ originalIndex }) => originalIndex === activeIndex);
+          const activeGroupEntry = groupTabs.find(
+            ({ tab, originalIndex }) => tab.is_open !== false && originalIndex === activeIndex,
+          );
           const groupColor = getColorById(groupColors[group.id]);
           const groupContainerStyle: React.CSSProperties = {
             ...styles.groupContainer,
@@ -601,7 +681,9 @@ function TabBar(props: TabBarProps) {
               )}
 
               {/* Group tabs (hidden when collapsed) */}
-              {tabLayout === "horizontal" && !isCollapsed && renderRepositoryTabs(groupTabs)}
+              {tabLayout === "horizontal" &&
+                !isCollapsed &&
+                renderRepositoryTabs(groupTabs, group.id)}
             </div>
           );
         })}
@@ -612,9 +694,13 @@ function TabBar(props: TabBarProps) {
         <button
           ref={addButtonRef}
           style={styles.addButton}
-          onClick={onAddMenuOpen}
+          onClick={() => {
+            setEditorPickerTarget(null);
+            onAddMenuOpen();
+          }}
           onMouseDown={(e) => e.stopPropagation()}
           title={t("tabBar.newEditorTooltip")}
+          aria-label={t("tabBar.newEditorTooltip")}
         >
           +
         </button>
@@ -630,7 +716,9 @@ function TabBar(props: TabBarProps) {
           showBranch={showBranch !== false}
           anchorLeft={groupListAnchorLeft}
           expandedRepositories={expandedRepositories}
-          onTabClick={handleTabClick}
+          onTabClick={(index, anchorRect) =>
+            handleTabClick(index, anchorRect, openGroup.id)
+          }
           onCloseTab={handleCloseTab}
           onRequestClose={closeGroupList}
           onTabContextMenu={handleListTabContextMenu}
@@ -665,14 +753,39 @@ function TabBar(props: TabBarProps) {
       {showAddMenu && (
         <AddTabMenu
           entries={history}
-          currentWindows={tabs}
-          onNewWindow={() => {
-            onNewTab();
+          onNewWindow={async (anchorRect) => {
+            onAddMenuHandoff();
+            // Finish the current input event before mounting the next overlay.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            setEditorPickerTarget({
+              kind: "new-window",
+              name: t("history.newWindow"),
+              anchorRect,
+            });
           }}
-          onSelectHistory={onHistorySelect}
+          onSelectHistory={async (entry, anchorRect) => {
+            onAddMenuHandoff();
+            // Finish the current input event before mounting the next overlay.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            setEditorPickerTarget({
+              kind: "history",
+              name: entry.name,
+              entry,
+              anchorRect,
+            });
+          }}
           onClearHistory={onHistoryClear}
           onClose={onAddMenuClose}
           anchorRef={addButtonRef}
+        />
+      )}
+
+      {editorPickerTarget && (
+        <EditorPicker
+          targetName={editorPickerTarget.name}
+          anchorRect={editorPickerTarget.anchorRect}
+          onSelect={handleEditorSelect}
+          onClose={() => void closeEditorPicker()}
         />
       )}
 

@@ -4,13 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { TFunction } from "i18next";
-import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS } from "../types/editor";
-import type { EditorWindow, WindowsSnapshot, GroupDefinition, GroupAssignment, TabColorMap } from "../types/editor";
+import { TAB_BAR_HEIGHT, ALL_EDITOR_BUNDLE_IDS, EDITOR_DISPLAY_NAMES } from "../types/editor";
+import type { EditorWindow, WindowsSnapshot, GroupDefinition, GroupAssignment, ProjectEditorBundleId, ProjectMetadata, SavedTab, TabColorMap } from "../types/editor";
 import {
   loadTabOrder,
   loadTabColors,
+  loadHistory,
+  loadSavedTabs,
   saveTabOrder,
   saveTabColors,
+  saveSavedTabs,
   windowKey,
   sortWindowsByOrder,
   loadGroups,
@@ -21,9 +24,19 @@ import {
   saveCollapsedGroups,
   loadGroupColors,
   saveGroupColors,
+  legacyWindowKey,
   migrateResolvedWindowKeys,
+  normalizeProjectPath,
   runtimeWindowKey,
 } from "../utils/store";
+import {
+  migrateSavedTabKeys,
+  migrateLegacySavedTabs,
+  mergeProjectMetadata,
+  reconcilePersistentTabs,
+  savedTabKey,
+  savedTabsDiffer,
+} from "../utils/persistentTabs";
 
 interface UseEditorWindowsParams {
   dismissWaitingForWindow: (window: EditorWindow) => void;
@@ -53,7 +66,13 @@ interface UseEditorWindowsReturn {
   syncActiveTab: () => Promise<void>;
   syncActiveTabRef: MutableRefObject<() => Promise<void>>;
   handleTabClick: (index: number) => void;
-  handleNewTab: () => Promise<void>;
+  handleNewTab: (bundleId?: ProjectEditorBundleId) => Promise<boolean>;
+  handleOpenProject: (path: string, bundleId: ProjectEditorBundleId) => Promise<boolean>;
+  handleOpenSavedTab: (
+    index: number,
+    bundleId: ProjectEditorBundleId,
+    groupId?: string,
+  ) => Promise<boolean>;
   handleCloseTab: (index: number) => Promise<void>;
   handleReorder: (from: number, to: number) => void;
   handleReorderByVisual: (visualOrder: number[]) => void;
@@ -80,8 +99,14 @@ function editorWindowListsDiffer(next: EditorWindow[], current: EditorWindow[]):
       previous.repository_name !== window.repository_name ||
       previous.bundle_id !== window.bundle_id ||
       previous.editor_name !== window.editor_name ||
-      previous.resolution !== window.resolution;
+      previous.resolution !== window.resolution ||
+      previous.is_open !== window.is_open ||
+      previous.open_error !== window.open_error;
   });
+}
+
+function stringListsDiffer(a: string[], b: string[]): boolean {
+  return a.length !== b.length || a.some((value, index) => value !== b[index]);
 }
 
 function normalizeSnapshot(payload: WindowsSnapshot | EditorWindow[]): WindowsSnapshot {
@@ -89,6 +114,115 @@ function normalizeSnapshot(payload: WindowsSnapshot | EditorWindow[]): WindowsSn
     return { revision: 0, windows: payload, active_id: null, source: "legacy" };
   }
   return payload;
+}
+
+function isAppliedStructuredSnapshot(
+  payload: WindowsSnapshot | EditorWindow[],
+  lastRevision: number,
+): boolean {
+  return !Array.isArray(payload) && payload.revision <= lastRevision;
+}
+
+function isLegacyNameOrderKey(key: string): boolean {
+  return ALL_EDITOR_BUNDLE_IDS.some((bundleId) => {
+    const prefix = `${bundleId}:`;
+    if (!key.startsWith(prefix)) return false;
+    const identity = key.slice(prefix.length);
+    return Boolean(identity) &&
+      !identity.startsWith("/") &&
+      !identity.startsWith("runtime:");
+  });
+}
+
+function mergeOrderWithUnresolvedLegacyKeys(
+  currentOrder: string[],
+  tabs: EditorWindow[],
+): string[] {
+  const nextKeys = [...new Set(tabs.map(windowKey))];
+  const nextKeySet = new Set(nextKeys);
+  const pathKeysByLegacyKey = new Map<string, Set<string>>();
+  for (const tab of tabs) {
+    if (!tab.path) continue;
+    const key = legacyWindowKey(tab);
+    const pathKeys = pathKeysByLegacyKey.get(key) ?? new Set<string>();
+    pathKeys.add(windowKey(tab));
+    pathKeysByLegacyKey.set(key, pathKeys);
+  }
+
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  const append = (key: string) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(key);
+  };
+
+  for (const key of currentOrder) {
+    if (nextKeySet.has(key)) {
+      append(key);
+      continue;
+    }
+
+    const replacements = pathKeysByLegacyKey.get(key);
+    if (replacements?.size === 1) {
+      append([...replacements][0]);
+      continue;
+    }
+
+    if (isLegacyNameOrderKey(key)) {
+      append(key);
+    }
+  }
+
+  for (const key of nextKeys) {
+    append(key);
+  }
+  return merged;
+}
+
+function mergeReorderedTabsWithUnresolvedLegacyKeys(
+  currentOrder: string[],
+  tabs: EditorWindow[],
+): string[] {
+  const reorderedKeys = [...new Set(tabs.map(windowKey))];
+  const reorderedKeySet = new Set(reorderedKeys);
+  const pathKeysByLegacyKey = new Map<string, Set<string>>();
+  for (const tab of tabs) {
+    if (!tab.path) continue;
+    const key = legacyWindowKey(tab);
+    const pathKeys = pathKeysByLegacyKey.get(key) ?? new Set<string>();
+    pathKeys.add(windowKey(tab));
+    pathKeysByLegacyKey.set(key, pathKeys);
+  }
+  const unresolvedLegacyKeys = new Set(
+    currentOrder.filter(
+      (key) =>
+        isLegacyNameOrderKey(key) &&
+        pathKeysByLegacyKey.get(key)?.size !== 1,
+    ),
+  );
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  let reorderedIndex = 0;
+  const append = (key: string) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(key);
+  };
+
+  for (const key of currentOrder) {
+    if (unresolvedLegacyKeys.has(key)) {
+      append(key);
+    } else if (reorderedKeySet.has(key) && reorderedIndex < reorderedKeys.length) {
+      append(reorderedKeys[reorderedIndex]);
+      reorderedIndex += 1;
+    }
+  }
+  while (reorderedIndex < reorderedKeys.length) {
+    append(reorderedKeys[reorderedIndex]);
+    reorderedIndex += 1;
+  }
+  return merged;
 }
 
 export function useEditorWindows({
@@ -109,9 +243,12 @@ export function useEditorWindows({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [groupColors, setGroupColors] = useState<Record<string, string>>({});
   const windowsRef = useRef<EditorWindow[]>([]);
+  const liveWindowsRef = useRef<EditorWindow[]>([]);
+  const savedTabsRef = useRef<SavedTab[]>([]);
   const activeIndexRef = useRef<number>(0);
   const tabOrderRef = useRef<string[]>([]);
   const orderLoadedRef = useRef(false);
+  const stateLoadPromiseRef = useRef<Promise<void> | null>(null);
   const lastTabClickTimeRef = useRef<number>(0);
   const lastSnapshotRevisionRef = useRef<number>(-1);
 
@@ -124,66 +261,159 @@ export function useEditorWindows({
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
+  const ensureStateLoaded = useCallback(async () => {
+    if (orderLoadedRef.current) return;
+
+    if (!stateLoadPromiseRef.current) {
+      stateLoadPromiseRef.current = (async () => {
+        const [order, colors, savedTabs, history, grps, assigns, collapsed, grpColors] = await Promise.all([
+          loadTabOrder(),
+          loadTabColors(),
+          loadSavedTabs(),
+          loadHistory(),
+          loadGroups(),
+          loadGroupAssignments(),
+          loadCollapsedGroups(),
+          loadGroupColors(),
+        ]);
+        const migratedSavedTabs = migrateLegacySavedTabs(savedTabs, order, history);
+        tabOrderRef.current = order;
+        savedTabsRef.current = migratedSavedTabs;
+        const restoredTabs = sortWindowsByOrder(
+          reconcilePersistentTabs(migratedSavedTabs, []).tabs,
+          order,
+        );
+        windowsRef.current = restoredTabs;
+        setWindows(restoredTabs);
+        setTabColors(colors);
+        setGroups(grps);
+        setGroupAssignments(assigns);
+        setCollapsedGroups(new Set(collapsed));
+        setGroupColors(grpColors);
+
+        const metadataPaths = [...new Set(
+          migratedSavedTabs
+            .map((tab) => normalizeProjectPath(tab.path))
+            .filter(Boolean),
+        )];
+        let initialSavedTabs = migratedSavedTabs;
+        if (metadataPaths.length > 0) {
+          try {
+            const metadata = await invoke<ProjectMetadata[]>("get_project_metadata", {
+              paths: metadataPaths,
+            });
+            initialSavedTabs = mergeProjectMetadata(migratedSavedTabs, metadata);
+          } catch (error) {
+            console.error("Failed to load project metadata:", error);
+          }
+        }
+        savedTabsRef.current = initialSavedTabs;
+        const tabsWithMetadata = sortWindowsByOrder(
+          reconcilePersistentTabs(initialSavedTabs, []).tabs,
+          order,
+        );
+        windowsRef.current = tabsWithMetadata;
+        setWindows(tabsWithMetadata);
+        if (savedTabsDiffer(initialSavedTabs, savedTabs)) {
+          void saveSavedTabs(initialSavedTabs);
+        }
+        orderLoadedRef.current = true;
+      })();
+    }
+
+    try {
+      await stateLoadPromiseRef.current;
+    } catch (error) {
+      stateLoadPromiseRef.current = null;
+      throw error;
+    }
+  }, []);
+
+  const applySnapshot = useCallback((snapshot: WindowsSnapshot): EditorWindow[] => {
+    const nextLiveWindows = snapshot.windows.map((window) => ({ ...window, is_open: true }));
+    const currentLiveWindows = liveWindowsRef.current;
+
+    const migratedOrder = migrateResolvedWindowKeys(
+      tabOrderRef.current,
+      currentLiveWindows,
+      nextLiveWindows,
+    );
+    if (stringListsDiffer(migratedOrder, tabOrderRef.current)) {
+      void saveTabOrder(migratedOrder);
+    }
+    tabOrderRef.current = migratedOrder;
+
+    const migratedSavedTabs = migrateSavedTabKeys(
+      savedTabsRef.current,
+      currentLiveWindows,
+      nextLiveWindows,
+    );
+    const reconciled = reconcilePersistentTabs(migratedSavedTabs, nextLiveWindows);
+    if (savedTabsDiffer(reconciled.savedTabs, savedTabsRef.current)) {
+      savedTabsRef.current = reconciled.savedTabs;
+      void saveSavedTabs(reconciled.savedTabs);
+    } else {
+      savedTabsRef.current = reconciled.savedTabs;
+    }
+
+    const sorted = sortWindowsByOrder(reconciled.tabs, tabOrderRef.current);
+    const newOrder = mergeOrderWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      sorted,
+    );
+    if (stringListsDiffer(newOrder, tabOrderRef.current)) {
+      tabOrderRef.current = newOrder;
+      void saveTabOrder(newOrder);
+    }
+
+    const nextWindowKeys = new Set(nextLiveWindows.map(windowKey));
+    const nextRuntimeKeys = new Set(nextLiveWindows.map(runtimeWindowKey));
+    const disappeared = currentLiveWindows.filter(
+      (window) =>
+        window.path &&
+        !nextWindowKeys.has(windowKey(window)) &&
+        !nextRuntimeKeys.has(runtimeWindowKey(window)),
+    );
+    if (disappeared.length > 0) {
+      addToHistory(disappeared);
+    }
+
+    liveWindowsRef.current = nextLiveWindows;
+    const currentWindows = windowsRef.current;
+    windowsRef.current = sorted;
+    if (editorWindowListsDiffer(sorted, currentWindows)) {
+      setWindows(sorted);
+    }
+
+    if (sorted.length === 0) {
+      activeIndexRef.current = 0;
+      setActiveIndex(0);
+    } else if (activeIndexRef.current >= sorted.length) {
+      activeIndexRef.current = sorted.length - 1;
+      setActiveIndex(sorted.length - 1);
+    }
+
+    return sorted;
+  }, [addToHistory]);
+
   const refreshWindows = useCallback(async () => {
     try {
-      if (!orderLoadedRef.current) {
-        tabOrderRef.current = await loadTabOrder();
-        orderLoadedRef.current = true;
-      }
-
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      await ensureStateLoaded();
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
       void invoke("request_windows_refresh");
+      if (isAppliedStructuredSnapshot(payload, lastSnapshotRevisionRef.current)) {
+        return;
+      }
       lastSnapshotRevisionRef.current = Math.max(
         lastSnapshotRevisionRef.current,
         snapshot.revision,
       );
-      const result = snapshot.windows;
-      const migratedOrder = migrateResolvedWindowKeys(
-        tabOrderRef.current,
-        windowsRef.current,
-        result,
-      );
-      if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
-        void saveTabOrder(migratedOrder);
-      }
-      tabOrderRef.current = migratedOrder;
-      const sorted = sortWindowsByOrder(result, tabOrderRef.current);
-      const newOrder = sorted.map((w) => windowKey(w));
-      const orderChanged =
-        newOrder.length !== tabOrderRef.current.length ||
-        newOrder.some((key, i) => tabOrderRef.current[i] !== key);
-      if (orderChanged) {
-        tabOrderRef.current = newOrder;
-      }
-
-      const currentWindows = windowsRef.current;
-      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
-
-      if (hasChanged) {
-        // Skip clearing windows on transient AX API empty response
-        if (sorted.length === 0 && currentWindows.length > 0) {
-          return;
-        }
-
-        const newKeys = new Set(sorted.map(windowKey));
-        const disappeared = currentWindows.filter(
-          (w) => !newKeys.has(windowKey(w)) && w.path
-        );
-        if (disappeared.length > 0) {
-          addToHistory(disappeared);
-        }
-
-        setWindows(sorted);
-        if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
-          setActiveIndex(sorted.length - 1);
-        }
-      }
+      applySnapshot(snapshot);
     } catch (error) {
       console.error("Failed to get editor windows:", error);
     }
-  }, [addToHistory]);
+  }, [applySnapshot, ensureStateLoaded]);
 
   const syncActiveTab = useCallback(async () => {
     const timeSinceLastClick = Date.now() - lastTabClickTimeRef.current;
@@ -192,9 +422,14 @@ export function useEditorWindows({
     }
 
     try {
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
+      if (
+        !Array.isArray(payload) &&
+        payload.revision < lastSnapshotRevisionRef.current
+      ) {
+        return;
+      }
 
       if (snapshot.active_id !== null && snapshot.windows.length > 0) {
         const frontmost = snapshot.windows.find((window) => window.id === snapshot.active_id);
@@ -212,43 +447,172 @@ export function useEditorWindows({
     }
   }, [syncWaitingTimer]);
 
-  const handleTabClick = useCallback(
-    (index: number) => {
-      if (index === activeIndexRef.current) return;
-
+  const focusLiveWindow = useCallback(
+    async (window: EditorWindow, index: number) => {
       lastTabClickTimeRef.current = Date.now();
       setActiveIndex(index);
-      const window = windowsRef.current[index];
-      if (window) {
-        dismissWaitingForWindow(window);
-
-        invoke("focus_editor_window", { bundle_id: window.bundle_id, window_id: window.id })
-          .then(() =>
-            invoke("maximize_editor_window", {
-              bundle_id: window.bundle_id,
-              window_id: window.id,
-              tab_bar_height: TAB_BAR_HEIGHT,
-            })
-          )
-          .catch((error) => {
-            console.error("Failed to focus/maximize window:", error);
-          });
+      activeIndexRef.current = index;
+      dismissWaitingForWindow(window);
+      try {
+        await invoke("focus_editor_window", {
+          bundle_id: window.bundle_id,
+          window_id: window.id,
+        });
+        await invoke("maximize_editor_window", {
+          bundle_id: window.bundle_id,
+          window_id: window.id,
+          tab_bar_height: TAB_BAR_HEIGHT,
+        });
+        return true;
+      } catch (error) {
+        console.error("Failed to focus/maximize window:", error);
+        return false;
       }
     },
     [dismissWaitingForWindow]
   );
 
-  const handleNewTab = useCallback(async () => {
+  const handleTabClick = useCallback(
+    (index: number) => {
+      const window = windowsRef.current[index];
+      if (!window || window.is_open === false) return;
+      if (index === activeIndexRef.current) return;
+      void focusLiveWindow(window, index);
+    },
+    [focusLiveWindow]
+  );
+
+  const handleOpenProject = useCallback(
+    async (path: string, bundleId: ProjectEditorBundleId) => {
+      const normalizedPath = normalizeProjectPath(path);
+      const existingIndex = windowsRef.current.findIndex(
+        (window) =>
+          window.is_open !== false &&
+          window.bundle_id === bundleId &&
+          normalizeProjectPath(window.path) === normalizedPath,
+      );
+      if (existingIndex >= 0) {
+        return focusLiveWindow(windowsRef.current[existingIndex], existingIndex);
+      }
+
+      try {
+        await invoke("open_project_in_editor", {
+          bundle_id: bundleId,
+          path: normalizedPath,
+        });
+        setTimeout(() => refreshWindowsRef.current(), 1000);
+        return true;
+      } catch (error) {
+        console.error("Failed to open project:", error);
+        return false;
+      }
+    },
+    [focusLiveWindow],
+  );
+
+  const handleOpenSavedTab = useCallback(
+    async (
+      index: number,
+      bundleId: ProjectEditorBundleId,
+      displayedGroupId?: string,
+    ) => {
+      await ensureStateLoaded();
+      const savedWindow = windowsRef.current[index];
+      if (!savedWindow?.path) return false;
+      if (savedWindow.is_open !== false) {
+        return focusLiveWindow(savedWindow, index);
+      }
+
+      const sourceKey = windowKey(savedWindow);
+      const retargetedTab: SavedTab = {
+        name: savedWindow.name,
+        path: normalizeProjectPath(savedWindow.path),
+        branch: savedWindow.branch,
+        repository_id: savedWindow.repository_id,
+        repository_name: savedWindow.repository_name,
+        bundle_id: bundleId,
+        editor_name: EDITOR_DISPLAY_NAMES[bundleId],
+        resolution: savedWindow.resolution,
+      };
+      const targetKey = savedTabKey(retargetedTab);
+      const targetAlreadySaved = savedTabsRef.current.some(
+        (tab) => savedTabKey(tab) === targetKey && savedTabKey(tab) !== sourceKey,
+      );
+      let sourceReplaced = false;
+      const nextSavedTabs = savedTabsRef.current.flatMap((tab) => {
+        if (savedTabKey(tab) !== sourceKey) return [tab];
+        sourceReplaced = true;
+        return targetAlreadySaved ? [] : [retargetedTab];
+      });
+      if (!sourceReplaced && !targetAlreadySaved) {
+        nextSavedTabs.push(retargetedTab);
+      }
+
+      savedTabsRef.current = nextSavedTabs;
+      void saveSavedTabs(nextSavedTabs);
+
+      if (sourceKey !== targetKey) {
+        const targetAlreadyOrdered = tabOrderRef.current.includes(targetKey);
+        const nextOrder = tabOrderRef.current.flatMap((key) => {
+          if (key !== sourceKey) return [key];
+          return targetAlreadyOrdered ? [] : [targetKey];
+        });
+        tabOrderRef.current = [...new Set(nextOrder)];
+        void saveTabOrder(tabOrderRef.current);
+
+        setGroupAssignments((currentAssignments) => {
+          const sourceGroupId = displayedGroupId ?? (
+            Object.prototype.hasOwnProperty.call(currentAssignments, sourceKey)
+              ? currentAssignments[sourceKey]
+              : currentAssignments[legacyWindowKey(savedWindow)]
+          );
+          if (sourceGroupId === undefined) return currentAssignments;
+
+          const nextAssignments = { ...currentAssignments };
+          delete nextAssignments[sourceKey];
+          nextAssignments[targetKey] = sourceGroupId;
+          void saveGroupAssignments(nextAssignments);
+          return nextAssignments;
+        });
+      }
+
+      const reconciled = reconcilePersistentTabs(nextSavedTabs, liveWindowsRef.current);
+      const sorted = sortWindowsByOrder(reconciled.tabs, tabOrderRef.current);
+      windowsRef.current = sorted;
+      setWindows(sorted);
+
+      const targetIndex = sorted.findIndex((window) => windowKey(window) === targetKey);
+      if (targetIndex >= 0) {
+        activeIndexRef.current = targetIndex;
+        setActiveIndex(targetIndex);
+      }
+
+      const opened = await handleOpenProject(retargetedTab.path, bundleId);
+      if (!opened) {
+        const errorWindows = windowsRef.current.map((window) =>
+          windowKey(window) === targetKey ? { ...window, open_error: true } : window
+        );
+        windowsRef.current = errorWindows;
+        setWindows(errorWindows);
+      }
+      return opened;
+    },
+    [ensureStateLoaded, focusLiveWindow, handleOpenProject],
+  );
+
+  const handleNewTab = useCallback(async (selectedBundleId?: ProjectEditorBundleId) => {
     try {
-      const bundleId = currentBundleIdRef.current;
+      const bundleId = selectedBundleId ?? currentBundleIdRef.current;
       if (!bundleId) {
         console.warn("No bundle_id available, cannot open new editor window");
-        return;
+        return false;
       }
       await invoke("open_new_editor", { bundle_id: bundleId });
       setTimeout(() => refreshWindowsRef.current(), 1000);
+      return true;
     } catch (error) {
       console.error("Failed to open new editor:", error);
+      return false;
     }
   }, [currentBundleIdRef]);
 
@@ -256,17 +620,42 @@ export function useEditorWindows({
     async (index: number) => {
       const win = windowsRef.current[index];
       if (win) {
-        const ok = await ask(t("app.closeConfirm", { name: win.name || t("app.untitled") }), {
+        const confirmKey = win.is_open === false
+          ? "app.removeTabConfirm"
+          : "app.closeAndRemoveConfirm";
+        const ok = await ask(t(confirmKey, { name: win.name || t("app.untitled") }), {
           title: t("app.closeConfirmTitle"),
           kind: "warning",
         });
         if (!ok) return;
 
         try {
-          await invoke("close_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
+          if (win.is_open !== false) {
+            await invoke("close_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
+          }
+
+          const key = windowKey(win);
+          const nextSavedTabs = savedTabsRef.current.filter(
+            (savedTab) => savedTabKey(savedTab) !== key,
+          );
+          savedTabsRef.current = nextSavedTabs;
+          await saveSavedTabs(nextSavedTabs);
+
+          const nextOrder = tabOrderRef.current.filter((tabKey) => tabKey !== key);
+          tabOrderRef.current = nextOrder;
+          await saveTabOrder(nextOrder);
+
+          const nextWindows = windowsRef.current.filter((window) => windowKey(window) !== key);
+          windowsRef.current = nextWindows;
+          setWindows(nextWindows);
+          const nextActiveIndex = nextWindows.length === 0
+            ? 0
+            : Math.min(activeIndexRef.current, nextWindows.length - 1);
+          activeIndexRef.current = nextActiveIndex;
+          setActiveIndex(nextActiveIndex);
           setTimeout(() => refreshWindowsRef.current(), 500);
         } catch (error) {
-          console.error("Failed to close window:", error);
+          console.error("Failed to close or remove tab:", error);
         }
       }
     },
@@ -288,7 +677,10 @@ export function useEditorWindows({
     const [moved] = newWindows.splice(fromIndex, 1);
     newWindows.splice(toIndex, 0, moved);
 
-    const newOrder = newWindows.map((w) => windowKey(w));
+    const newOrder = mergeReorderedTabsWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      newWindows,
+    );
     tabOrderRef.current = newOrder;
     saveTabOrder(newOrder);
 
@@ -310,7 +702,10 @@ export function useEditorWindows({
     const currentWindows = windowsRef.current;
     const newWindows = visualOrder.map((i) => currentWindows[i]);
 
-    const newOrder = newWindows.map((w) => windowKey(w));
+    const newOrder = mergeReorderedTabsWithUnresolvedLegacyKeys(
+      tabOrderRef.current,
+      newWindows,
+    );
     tabOrderRef.current = newOrder;
     saveTabOrder(newOrder);
 
@@ -445,61 +840,22 @@ export function useEditorWindows({
 
   const fetchWindows = useCallback(async (): Promise<number> => {
     try {
-      if (!orderLoadedRef.current) {
-        const [order, colors, grps, assigns, collapsed, grpColors] = await Promise.all([
-          loadTabOrder(),
-          loadTabColors(),
-          loadGroups(),
-          loadGroupAssignments(),
-          loadCollapsedGroups(),
-          loadGroupColors(),
-        ]);
-        tabOrderRef.current = order;
-        setTabColors(colors);
-        setGroups(grps);
-        setGroupAssignments(assigns);
-        setCollapsedGroups(new Set(collapsed));
-        setGroupColors(grpColors);
-        orderLoadedRef.current = true;
-      }
-
-      const snapshot = normalizeSnapshot(
-        await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot"),
-      );
+      await ensureStateLoaded();
+      const payload = await invoke<WindowsSnapshot | EditorWindow[]>("get_windows_snapshot");
+      const snapshot = normalizeSnapshot(payload);
       void invoke("request_windows_refresh");
+      if (isAppliedStructuredSnapshot(payload, lastSnapshotRevisionRef.current)) {
+        return windowsRef.current.length;
+      }
       const result = snapshot.windows;
       lastSnapshotRevisionRef.current = Math.max(
         lastSnapshotRevisionRef.current,
         snapshot.revision,
       );
-      const migratedOrder = migrateResolvedWindowKeys(
-        tabOrderRef.current,
-        windowsRef.current,
-        result,
-      );
-      if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
-        void saveTabOrder(migratedOrder);
-      }
-      tabOrderRef.current = migratedOrder;
-      const sorted = sortWindowsByOrder(result, tabOrderRef.current);
-      tabOrderRef.current = sorted.map((w) => windowKey(w));
+      const sorted = applySnapshot(snapshot);
 
-      const currentWindows = windowsRef.current;
-      const hasChanged = editorWindowListsDiffer(sorted, currentWindows);
-
-      if (hasChanged) {
-        // Skip clearing windows on transient AX API empty response
-        if (sorted.length === 0 && currentWindows.length > 0) {
-          return 0;
-        }
-        setWindows(sorted);
-        if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
-          setActiveIndex(sorted.length - 1);
-        }
-      }
-
-      if (sorted.length > 0) {
-        addToHistory(sorted);
+      if (result.length > 0) {
+        addToHistory(result);
       }
 
       return sorted.length;
@@ -507,10 +863,11 @@ export function useEditorWindows({
       console.error("Failed to fetch windows:", error);
       return 0;
     }
-  }, [addToHistory]);
+  }, [addToHistory, applySnapshot, ensureStateLoaded]);
 
   // Refs for callback functions to avoid stale closures in event listeners
   const refreshWindowsRef = useRef(refreshWindows);
+  const handleTabClickRef = useRef(handleTabClick);
   const handleCloseTabRef = useRef(handleCloseTab);
   const handleNewTabRef = useRef(handleNewTab);
   const syncActiveTabRef = useRef(syncActiveTab);
@@ -519,6 +876,9 @@ export function useEditorWindows({
   useEffect(() => {
     refreshWindowsRef.current = refreshWindows;
   }, [refreshWindows]);
+  useEffect(() => {
+    handleTabClickRef.current = handleTabClick;
+  }, [handleTabClick]);
   useEffect(() => {
     handleCloseTabRef.current = handleCloseTab;
   }, [handleCloseTab]);
@@ -558,7 +918,7 @@ export function useEditorWindows({
         if (isMounted) {
           const currentIndex = activeIndexRef.current;
           const win = windowsRef.current[currentIndex];
-          if (win) {
+          if (win?.is_open !== false) {
             invoke("close_editor_window", { bundle_id: win.bundle_id, window_id: win.id });
             setTimeout(() => refreshWindowsRef.current(), 500);
           }
@@ -568,20 +928,8 @@ export function useEditorWindows({
 
       const unlistenSwitch = await listen<number>("switch-to-tab", (event) => {
         if (isMounted && event.payload < windowsRef.current.length) {
-          setActiveIndex(event.payload);
-          activeIndexRef.current = event.payload;
+          handleTabClickRef.current(event.payload);
           syncWaitingTimer();
-          const win = windowsRef.current[event.payload];
-          if (win) {
-            invoke("focus_editor_window", { bundle_id: win.bundle_id, window_id: win.id }).then(
-              () =>
-                invoke("maximize_editor_window", {
-                  bundle_id: win.bundle_id,
-                  window_id: win.id,
-                  tab_bar_height: TAB_BAR_HEIGHT,
-                })
-            );
-          }
         }
       });
       cleanupFns.push(unlistenSwitch);
@@ -628,47 +976,13 @@ export function useEditorWindows({
         }
         lastSnapshotRevisionRef.current = event.payload.revision;
 
-        const migratedOrder = migrateResolvedWindowKeys(
-          tabOrderRef.current,
-          windowsRef.current,
-          event.payload.windows,
-        );
-        if (migratedOrder.some((key, index) => key !== tabOrderRef.current[index])) {
-          void saveTabOrder(migratedOrder);
-        }
-        tabOrderRef.current = migratedOrder;
-        const sorted = sortWindowsByOrder(event.payload.windows, tabOrderRef.current);
-        const newOrder = sorted.map((w) => windowKey(w));
-        const orderChanged =
-          newOrder.length !== tabOrderRef.current.length ||
-          newOrder.some((key, i) => tabOrderRef.current[i] !== key);
-        if (orderChanged) {
-          tabOrderRef.current = newOrder;
-        }
-
-        const currentWindows = windowsRef.current;
-        const windowsChanged = editorWindowListsDiffer(sorted, currentWindows);
-
-        if (windowsChanged) {
-          const newKeys = new Set(sorted.map(windowKey));
-          const disappeared = currentWindows.filter(
-            (w) => !newKeys.has(windowKey(w)) && w.path
-          );
-          if (disappeared.length > 0) {
-            addToHistory(disappeared);
-          }
-
-          setWindows(sorted);
-          if (sorted.length > 0 && activeIndexRef.current >= sorted.length) {
-            setActiveIndex(sorted.length - 1);
-          }
-        }
+        const sorted = applySnapshot(event.payload);
 
         // Map active_id (CGWindowID) → activeIndex in the sorted list.
         // Runs even when windows didn't change: Registry also emits on active change.
         const { active_id } = event.payload;
         if (active_id !== null && active_id !== undefined) {
-          const idx = sorted.findIndex((w) => w.id === active_id);
+          const idx = sorted.findIndex((w) => w.is_open !== false && w.id === active_id);
           if (idx >= 0 && idx !== activeIndexRef.current) {
             setActiveIndex(idx);
             activeIndexRef.current = idx;
@@ -685,7 +999,7 @@ export function useEditorWindows({
       isMounted = false;
       cleanupFns.forEach((fn) => fn());
     };
-  }, [syncWaitingTimer, isEditorActiveRef, isTabManagerActiveRef, isVisibleRef]);
+  }, [applySnapshot, syncWaitingTimer, isEditorActiveRef, isTabManagerActiveRef, isVisibleRef]);
 
   return {
     windows,
@@ -705,6 +1019,8 @@ export function useEditorWindows({
     syncActiveTabRef,
     handleTabClick,
     handleNewTab,
+    handleOpenProject,
+    handleOpenSavedTab,
     handleCloseTab,
     handleReorder,
     handleReorderByVisual,

@@ -33,6 +33,9 @@ interface UseAppLifecycleReturn {
   handleColorPickerClose: () => Promise<void>;
   handleAddMenuOpen: () => Promise<void>;
   handleAddMenuClose: () => Promise<void>;
+  handleAddMenuHandoff: () => void;
+  handleEditorPickerOpen: () => Promise<void>;
+  handleEditorPickerClose: () => Promise<void>;
   handleTabContextMenuOpen: () => Promise<void>;
   handleTabContextMenuClose: () => Promise<void>;
   handleWorktreeMenuOpen: (rowCount: number) => Promise<void>;
@@ -68,6 +71,7 @@ export function useAppLifecycle({
   const [tabLayout, setTabLayout] = useState<TabLayout>("horizontal");
   const isInitializedRef = useRef(false);
   const lastMonitorKeyRef = useRef<string | null>(null);
+  const editorPickerOpenRef = useRef(false);
 
   // Load notification + showBranch + language settings from store
   useEffect(() => {
@@ -282,12 +286,23 @@ export function useAppLifecycle({
     const appWindow = getCurrentWindow();
     const monitor = (await currentMonitor()) ?? (await primaryMonitor());
     if (!monitor) return;
+    if (showAddMenuRef.current || editorPickerOpenRef.current) return;
     const screenWidth = monitor.size.width / monitor.scaleFactor;
     const originX = monitor.position.x / monitor.scaleFactor;
     const originY = monitor.position.y / monitor.scaleFactor;
     lastMonitorKeyRef.current = getMonitorKey(monitor);
     await appWindow.setMaxSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
     await appWindow.setSize(new LogicalSize(screenWidth, TAB_BAR_HEIGHT));
+    await appWindow.setPosition(new LogicalPosition(originX, originY));
+  }, [showAddMenuRef]);
+
+  const positionTabBar = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    const monitor = (await currentMonitor()) ?? (await primaryMonitor());
+    if (!monitor) return;
+    const originX = monitor.position.x / monitor.scaleFactor;
+    const originY = monitor.position.y / monitor.scaleFactor;
+    lastMonitorKeyRef.current = getMonitorKey(monitor);
     await appWindow.setPosition(new LogicalPosition(originX, originY));
   }, []);
 
@@ -305,9 +320,20 @@ export function useAppLifecycle({
   const COLOR_PICKER_HEIGHT = 50;
   const CONTEXT_MENU_HEIGHT = 200;
   const ADD_MENU_HEIGHT = 420;
+  const EDITOR_PICKER_HEIGHT = 420;
 
   const handleColorPickerOpen = useCallback(() => expandWindow(COLOR_PICKER_HEIGHT), [expandWindow]);
   const handleTabContextMenuOpen = useCallback(() => expandWindow(CONTEXT_MENU_HEIGHT), [expandWindow]);
+  const handleEditorPickerOpen = useCallback(async () => {
+    editorPickerOpenRef.current = true;
+    try {
+      await expandWindow(EDITOR_PICKER_HEIGHT);
+    } catch (error) {
+      editorPickerOpenRef.current = false;
+      await resizeTabBar().catch(() => {});
+      throw error;
+    }
+  }, [expandWindow, resizeTabBar]);
   const handleWorktreeMenuOpen = useCallback(
     (rowCount: number) => expandWindow(Math.min(420, rowCount * 32 + 8)),
     [expandWindow],
@@ -315,17 +341,35 @@ export function useAppLifecycle({
   const handleOverlayClose = useCallback(async () => { await resizeTabBar(); }, [resizeTabBar]);
 
   const handleAddMenuOpen = useCallback(async () => {
-    await expandWindow(ADD_MENU_HEIGHT);
-    setShowAddMenu(true);
-  }, [expandWindow, setShowAddMenu]);
+    showAddMenuRef.current = true;
+    try {
+      await expandWindow(ADD_MENU_HEIGHT);
+      setShowAddMenu(true);
+    } catch (error) {
+      showAddMenuRef.current = false;
+      throw error;
+    }
+  }, [expandWindow, setShowAddMenu, showAddMenuRef]);
 
   const handleAddMenuClose = useCallback(
     async () => {
+      showAddMenuRef.current = false;
       setShowAddMenu(false);
       await resizeTabBar();
     },
-    [resizeTabBar, setShowAddMenu]
+    [resizeTabBar, setShowAddMenu, showAddMenuRef]
   );
+
+  const handleAddMenuHandoff = useCallback(() => {
+    editorPickerOpenRef.current = true;
+    showAddMenuRef.current = false;
+    setShowAddMenu(false);
+  }, [setShowAddMenu, showAddMenuRef]);
+
+  const handleEditorPickerClose = useCallback(async () => {
+    editorPickerOpenRef.current = false;
+    await resizeTabBar();
+  }, [resizeTabBar]);
 
   // Event-driven visibility (no polling)
   useEffect(() => {
@@ -342,6 +386,7 @@ export function useAppLifecycle({
       await appWindow.show();
       isVisibleRef.current = true;
       isInitializedRef.current = true;
+      await fetchWindowsRef.current();
       await syncActiveTabRef.current();
     };
     initWindow();
@@ -362,7 +407,11 @@ export function useAppLifecycle({
           if (app_type === "editor") {
             // Wait 150ms for macOS window animation to complete
             await new Promise((resolve) => setTimeout(resolve, 150));
-            await resizeTabBar();
+            if (showAddMenuRef.current || editorPickerOpenRef.current) {
+              await positionTabBar();
+            } else {
+              await resizeTabBar();
+            }
           }
           isVisibleRef.current = true;
           if (app_type === "editor") {
@@ -402,6 +451,7 @@ export function useAppLifecycle({
       const unlisten = await listen("display-changed", async () => {
         if (!isMounted) return;
         if (showAddMenuRef.current) return;
+        if (editorPickerOpenRef.current) return;
         if (!isVisibleRef.current) return;
         await resizeTabBar();
       });
@@ -413,6 +463,7 @@ export function useAppLifecycle({
       const unlisten = await appWindow.onMoved(async () => {
         if (!isMounted) return;
         if (showAddMenuRef.current) return;
+        if (editorPickerOpenRef.current) return;
         if (!isVisibleRef.current) return;
         const monitor = (await currentMonitor()) ?? (await primaryMonitor());
         if (!monitor) return;
@@ -430,6 +481,7 @@ export function useAppLifecycle({
     };
   }, [
     resizeTabBar,
+    positionTabBar,
     hasAccessibilityPermission,
     onboardingCompleted,
     fetchWindowsRef,
@@ -453,6 +505,9 @@ export function useAppLifecycle({
     handleColorPickerClose: handleOverlayClose,
     handleAddMenuOpen,
     handleAddMenuClose,
+    handleAddMenuHandoff,
+    handleEditorPickerOpen,
+    handleEditorPickerClose,
     handleTabContextMenuOpen,
     handleTabContextMenuClose: handleOverlayClose,
     handleWorktreeMenuOpen,

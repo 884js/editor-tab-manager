@@ -256,6 +256,74 @@ describe("useAppLifecycle", () => {
       expect(appWindow.setSize).toHaveBeenLastCalledWith(new LogicalSize(1920, 140));
     });
 
+    it("expands the window for the editor picker", async () => {
+      const appWindow = getCurrentWindow();
+      const { result } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+      });
+      vi.mocked(appWindow.setSize).mockClear();
+
+      await act(async () => {
+        await result.current.handleEditorPickerOpen();
+      });
+
+      expect(appWindow.setSize).toHaveBeenLastCalledWith(new LogicalSize(1920, 456));
+    });
+
+    it("hands off the add menu without resizing the window", async () => {
+      const appWindow = getCurrentWindow();
+      const { result, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+        expect(params.fetchWindowsRef.current).toHaveBeenCalled();
+      });
+      vi.mocked(appWindow.setMaxSize).mockClear();
+      vi.mocked(appWindow.setSize).mockClear();
+
+      act(() => {
+        result.current.handleAddMenuHandoff();
+      });
+
+      expect(params.setShowAddMenu).toHaveBeenCalledWith(false);
+      expect(appWindow.setMaxSize).not.toHaveBeenCalled();
+      expect(appWindow.setSize).not.toHaveBeenCalled();
+    });
+
+    it("does not finish an in-flight resize after the editor picker opens", async () => {
+      const appWindow = getCurrentWindow();
+      const { result, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+        expect(params.fetchWindowsRef.current).toHaveBeenCalled();
+      });
+      vi.mocked(appWindow.setMaxSize).mockClear();
+      vi.mocked(appWindow.setSize).mockClear();
+
+      let resolveMonitor = (_monitor: Awaited<ReturnType<typeof currentMonitor>>) => {};
+      const monitorPromise = new Promise<Awaited<ReturnType<typeof currentMonitor>>>((resolve) => {
+        resolveMonitor = resolve;
+      });
+      vi.mocked(currentMonitor).mockReturnValueOnce(monitorPromise);
+
+      const resize = result.current.resizeTabBar();
+      act(() => {
+        result.current.handleAddMenuHandoff();
+      });
+      resolveMonitor({
+        position: { x: 0, y: 0 },
+        size: { width: 1920, height: 1080 },
+        scaleFactor: 1,
+      } as Awaited<ReturnType<typeof currentMonitor>>);
+      await resize;
+
+      expect(appWindow.setMaxSize).not.toHaveBeenCalled();
+      expect(appWindow.setSize).not.toHaveBeenCalled();
+    });
+
   });
 
   describe("app-activated event", () => {
@@ -329,6 +397,72 @@ describe("useAppLifecycle", () => {
       await waitFor(() => {
         expect(appWindow.setSize).toHaveBeenCalledWith(new LogicalSize(3440, 36));
       });
+    });
+
+    it("keeps the editor picker expanded when editor activation arrives after handoff", async () => {
+      const { result, listeners, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+        expect(listeners.has("app-activated")).toBe(true);
+        expect(params.fetchWindowsRef.current).toHaveBeenCalled();
+      });
+
+      const appWindow = getCurrentWindow();
+      vi.mocked(appWindow.setMaxSize).mockClear();
+      vi.mocked(appWindow.setSize).mockClear();
+      vi.mocked(appWindow.setPosition).mockClear();
+      result.current.handleAddMenuHandoff();
+
+      const handler = listeners.get("app-activated") as unknown as (
+        event: { payload: AppActivationPayload },
+      ) => Promise<void>;
+      await act(async () => {
+        await handler({
+          payload: {
+            app_type: "editor",
+            bundle_id: "com.microsoft.VSCode",
+            is_on_primary_screen: true,
+            covers_editor: false,
+          },
+        });
+      });
+
+      expect(appWindow.setMaxSize).not.toHaveBeenCalled();
+      expect(appWindow.setSize).not.toHaveBeenCalled();
+      expect(appWindow.setPosition).toHaveBeenCalledOnce();
+    });
+
+    it("does not apply a delayed editor resize after the add menu opens", async () => {
+      const { result, listeners, params } = setup({ "onboarding:completed": true });
+
+      await waitFor(() => {
+        expect(result.current.onboardingCompleted).toBe(true);
+        expect(listeners.has("app-activated")).toBe(true);
+        expect(params.fetchWindowsRef.current).toHaveBeenCalled();
+      });
+
+      const appWindow = getCurrentWindow();
+      vi.mocked(appWindow.setMaxSize).mockClear();
+      vi.mocked(appWindow.setSize).mockClear();
+      const handler = listeners.get("app-activated") as unknown as (
+        event: { payload: AppActivationPayload },
+      ) => Promise<void>;
+
+      const activation = handler({
+        payload: {
+          app_type: "editor",
+          bundle_id: "com.microsoft.VSCode",
+          is_on_primary_screen: true,
+          covers_editor: false,
+        },
+      });
+      await act(async () => {
+        await result.current.handleAddMenuOpen();
+        await activation;
+      });
+
+      expect(appWindow.setSize).not.toHaveBeenCalledWith(new LogicalSize(1920, 36));
     });
 
     it("does not resize the window when the tab manager becomes active", async () => {
